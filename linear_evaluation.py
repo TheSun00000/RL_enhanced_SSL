@@ -18,14 +18,14 @@ if torch.cuda.is_available():
 
 transform = transforms.Compose([
     transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ])
 
 train_dataset = datasets.CIFAR10(root='dataset', train=True, download=True, transform=transform)
-train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True, num_workers=4)
+train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True)
 
-test_dataset = datasets.CIFAR10(root='dataset', train=False, download=True, transform=transform)
-test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=4)
+test_dataset = datasets.CIFAR10(root='dataset', train=True, download=True, transform=transform)
+test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=False)
 
 
 class LinearClassifier(nn.Module):
@@ -34,7 +34,8 @@ class LinearClassifier(nn.Module):
         self.fc = nn.Linear(input_size, num_classes)
 
     def forward(self, x):
-        return self.fc(x)
+        logits = self.fc(x)
+        return logits
     
     
     
@@ -71,14 +72,14 @@ encoder = encoder.to(device)
 
 
 
-linear_eval_model = LinearClassifier(128, num_classes=10).to(device)
+linear_eval_model = LinearClassifier(512, num_classes=10).to(device)
 
 # Set up loss function and optimizer
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(linear_eval_model.parameters(), lr=0.01, momentum=0.9)
 
 # Train the linear evaluation model
-num_epochs = 10
+num_epochs = 100
 
 for epoch in range(num_epochs):
     linear_eval_model.train()
@@ -89,7 +90,7 @@ for epoch in range(num_epochs):
         # Forward pass
         with torch.no_grad():
             features, projections = encoder(inputs)
-        outputs = linear_eval_model(projections)
+        outputs = linear_eval_model(features)
 
         # Compute loss and backpropagate
         loss = criterion(outputs, labels)
@@ -99,19 +100,19 @@ for epoch in range(num_epochs):
         
         
         
+    if (epoch+1) % 5 == 0:
+        linear_eval_model.eval()
+        correct = 0
+        total = 0
 
-    linear_eval_model.eval()
-    correct = 0
-    total = 0
+        with torch.no_grad():
+            for inputs, labels in tqdm(test_loader, desc="Evaluating"):
+                inputs, labels = inputs.to(device), labels.to(device)
+                features, projections = encoder(inputs)
+                outputs = linear_eval_model(features)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
 
-    with torch.no_grad():
-        for inputs, labels in tqdm(test_loader, desc="Evaluating"):
-            inputs, labels = inputs.to(device), labels.to(device)
-            features, projections = encoder(inputs)
-            outputs = linear_eval_model(projections)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    accuracy = correct / total
-    print(f"Linear evaluation accuracy on CIFAR-10: {accuracy * 100:.2f}%")
+        accuracy = correct / total
+        print(f"Linear evaluation accuracy on CIFAR-10: {accuracy * 100:.2f}%")
