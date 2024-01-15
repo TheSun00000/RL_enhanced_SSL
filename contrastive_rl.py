@@ -216,7 +216,7 @@ config = {
     'ppo_update_epochs':4,
     'ppo_update_bs':4,
     
-    'logs':True,
+    'logs':False,
     'model_save_path':model_save_path
     
 }
@@ -241,57 +241,57 @@ neptune_run = init_neptune(['contrastive_rl'] + [f'{k}={v}' for (k, v) in config
 
 for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
         
-    (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
-        encoder, 
-        num_steps=config['simclr_iterations'], 
-        batch_size=config['simclr_bs'], 
-        optimizer=simclr_optimizer, 
-        scheduler=simclr_scheduler, 
-        criterion=simclr_criterion, 
-        ppo_transform=False if step == 0 else True,
-        logs=logs,
-        neptune_run=neptune_run
-    )
-    crst_losses += losses
-    crst_top_1_score += top_1_score
-    crst_top_5_score += top_5_score
-    crst_top_10_score += top_10_score
+    # (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
+    #     encoder, 
+    #     num_steps=config['simclr_iterations'], 
+    #     batch_size=config['simclr_bs'], 
+    #     optimizer=simclr_optimizer, 
+    #     scheduler=simclr_scheduler, 
+    #     criterion=simclr_criterion, 
+    #     ppo_transform=False if step == 0 else True,
+    #     logs=logs,
+    #     neptune_run=neptune_run
+    # )
+    # crst_losses += losses
+    # crst_top_1_score += top_1_score
+    # crst_top_5_score += top_5_score
+    # crst_top_10_score += top_10_score
 
     
     
-    trajectory, (img1, img2, new_img1, new_img2), (ppo_losses, ppo_rewards) = ppo_round(
-        encoder, 
-        decoder,
-        ppo_optimizer,
-        ppo_rounds=config['ppo_iterations'],
-        len_trajectory=config['ppo_len_trajectory'], 
-        batch_size=config['ppo_collection_bs'], 
-        ppo_epochs=config['ppo_update_epochs'], 
-        ppo_batch_size=config['ppo_update_bs'],
-        logs=logs,
-        neptune_run=neptune_run
-    )
+    # trajectory, (img1, img2, new_img1, new_img2), (ppo_losses, ppo_rewards) = ppo_round(
+    #     encoder, 
+    #     decoder,
+    #     ppo_optimizer,
+    #     ppo_rounds=config['ppo_iterations'],
+    #     len_trajectory=config['ppo_len_trajectory'], 
+    #     batch_size=config['ppo_collection_bs'], 
+    #     ppo_epochs=config['ppo_update_epochs'], 
+    #     ppo_batch_size=config['ppo_update_bs'],
+    #     logs=logs,
+    #     neptune_run=neptune_run
+    # )
     
-    ppo_rewards_metric += ppo_rewards
-    
-    
-    
-    torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
-    torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
-    torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
-    torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
-    torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
+    # ppo_rewards_metric += ppo_rewards
     
     
-    if logs:
-        neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
-        neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
-        neptune_run["params/encoder_shd"].upload(f'{model_save_path}/encoder_shd.pt')
-        neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
-        neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
+    
+    # torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
+    # torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
+    # torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
+    # torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
+    # torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
     
     
-    train_acc, test_acc = linear_evaluation(encoder)
+    # if logs:
+    #     neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
+    #     neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
+    #     neptune_run["params/encoder_shd"].upload(f'{model_save_path}/encoder_shd.pt')
+    #     neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
+    #     neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
+    
+    
+    train_acc, test_acc = linear_evaluation(encoder, num_epochs=100)
     
     if logs:
         neptune_run["linear_eval/train_acc"].append(train_acc)
