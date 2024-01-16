@@ -207,16 +207,17 @@ def contrastive_round(model, num_steps, batch_size, optimizer, scheduler, criter
 config = {
     'iterations':50,
     
-    'simclr_iterations':2,
-    'simclr_bs':4,
+    'simclr_iterations':50,
+    'simclr_bs':1024,
+    'linear_eval_epochs':100,
     
     'ppo_iterations':100,
-    'ppo_len_trajectory':4,
-    'ppo_collection_bs':4,
+    'ppo_len_trajectory':512*4,
+    'ppo_collection_bs':512*2,
+    'ppo_update_bs':256,
     'ppo_update_epochs':4,
-    'ppo_update_bs':4,
     
-    'logs':False,
+    'logs':True,
     'model_save_path':model_save_path
     
 }
@@ -241,21 +242,22 @@ neptune_run = init_neptune(['contrastive_rl'] + [f'{k}={v}' for (k, v) in config
 
 for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
         
-    # (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
-    #     encoder, 
-    #     num_steps=config['simclr_iterations'], 
-    #     batch_size=config['simclr_bs'], 
-    #     optimizer=simclr_optimizer, 
-    #     scheduler=simclr_scheduler, 
-    #     criterion=simclr_criterion, 
-    #     ppo_transform=False if step == 0 else True,
-    #     logs=logs,
-    #     neptune_run=neptune_run
-    # )
-    # crst_losses += losses
-    # crst_top_1_score += top_1_score
-    # crst_top_5_score += top_5_score
-    # crst_top_10_score += top_10_score
+    (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
+        encoder, 
+        num_steps=config['simclr_iterations'], 
+        batch_size=config['simclr_bs'], 
+        optimizer=simclr_optimizer, 
+        scheduler=simclr_scheduler, 
+        criterion=simclr_criterion, 
+        # ppo_transform=False if step == 0 else True,
+        ppo_transform=False,
+        logs=logs,
+        neptune_run=neptune_run
+    )
+    crst_losses += losses
+    crst_top_1_score += top_1_score
+    crst_top_5_score += top_5_score
+    crst_top_10_score += top_10_score
 
     
     
@@ -271,27 +273,26 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     #     logs=logs,
     #     neptune_run=neptune_run
     # )
-    
     # ppo_rewards_metric += ppo_rewards
     
     
     
-    # torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
-    # torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
-    # torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
-    # torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
-    # torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
+    torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
+    torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
+    torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
+    torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
+    torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
     
     
-    # if logs:
-    #     neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
-    #     neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
-    #     neptune_run["params/encoder_shd"].upload(f'{model_save_path}/encoder_shd.pt')
-    #     neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
-    #     neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
+    if logs:
+        neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
+        neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
+        neptune_run["params/encoder_shd"].upload(f'{model_save_path}/encoder_shd.pt')
+        neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
+        neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
     
     
-    train_acc, test_acc = linear_evaluation(encoder, num_epochs=100)
+    train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
     
     if logs:
         neptune_run["linear_eval/train_acc"].append(train_acc)
