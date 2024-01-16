@@ -205,7 +205,7 @@ def contrastive_round(model, num_steps, batch_size, optimizer, scheduler, criter
 
 
 config = {
-    'iterations':50,
+    'iterations':100,
     
     'simclr_iterations':50,
     'simclr_bs':1024,
