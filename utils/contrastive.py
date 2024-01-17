@@ -92,7 +92,8 @@ def linear_evaluation(encoder, num_epochs=10):
 
     def extract_features(data_loader, encoder):
         features, labels = [], []
-        for images, labels_batch in tqdm(data_loader, desc='[Linear Eval][Features extraction]'):
+        # for images, labels_batch in tqdm(data_loader, desc='[Linear Eval][Features extraction]'):
+        for images, labels_batch in data_loader:
             with torch.no_grad():
                 features_batch, projections_batch = encoder(images.to(device))
             features.append(features_batch)
@@ -116,7 +117,8 @@ def linear_evaluation(encoder, num_epochs=10):
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(linear_eval_model.parameters(), lr=0.01, momentum=0.9)
     
-    for epoch in tqdm(range(num_epochs), desc="[Linear Eval][Training]"):
+    # for epoch in tqdm(range(num_epochs), desc="[Linear Eval][Training]"):
+    for epoch in range(num_epochs):
         linear_eval_model.train()
 
         for features, labels in features_train_dataloader:
@@ -135,7 +137,8 @@ def linear_evaluation(encoder, num_epochs=10):
         correct = 0
         total = 0
         with torch.no_grad():
-            for features, labels in tqdm(features_train_dataloader, desc="[Linear Eval][Train Eval]"):
+            # for features, labels in tqdm(features_train_dataloader, desc="[Linear Eval][Train Eval]"):
+            for features, labels in features_train_dataloader:
                 features, labels = features.to(device), labels.to(device)
                 outputs = linear_eval_model(features)
                 _, predicted = torch.max(outputs.data, 1)
@@ -146,7 +149,8 @@ def linear_evaluation(encoder, num_epochs=10):
         
         correct = 0
         total = 0
-        for features, labels in tqdm(features_test_dataloader, desc="[Linear Eval][Test Eval]"):
+        # for features, labels in tqdm(features_test_dataloader, desc="[Linear Eval][Test Eval]"):
+        for features, labels in features_test_dataloader:
             features, labels = features.to(device), labels.to(device)
             outputs = linear_eval_model(features)
             _, predicted = torch.max(outputs.data, 1)
