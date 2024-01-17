@@ -3,6 +3,7 @@ import torchvision
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
+from utils.networks import DecoderNoInput, DecoderRNN
 from utils.transforms import (
     apply_transformations,
     get_transforms_list
@@ -66,24 +67,43 @@ class DataLoaderWrapper:
     def decoder_transform(self, x):
         
         x1, x2 = x
-        x1 = x1.to(device)
-        x2 = x2.to(device)
+        
+        if isinstance(self.decoder, DecoderRNN):
+            x1 = x1.to(device)
+            x2 = x2.to(device)
 
-        with torch.no_grad():
-            _, z1 = self.encoder(x1)
-            _, z2 = self.encoder(x2)
+            with torch.no_grad():
+                _, z1 = self.encoder(x1)
+                _, z2 = self.encoder(x2)
 
-            (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(z1, z2)
+                (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(z1, z2)
 
-            transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
-            
-            x1 = x1.cpu()
-            x2 = x2.cpu()
-            
-            new_x1 = apply_transformations(x1, transforms_list_1)
-            new_x2 = apply_transformations(x2, transforms_list_2)
+                transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
                 
-        return (new_x1, new_x2)
+                x1 = x1.cpu()
+                x2 = x2.cpu()
+                
+                new_x1 = apply_transformations(x1, transforms_list_1)
+                new_x2 = apply_transformations(x2, transforms_list_2)
+                    
+            return (new_x1, new_x2)
+        
+        
+        elif isinstance(self.decoder, DecoderNoInput):
+            
+            with torch.no_grad():
+
+                (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(x1.shape[0])
+
+                transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
+                
+                x1 = x1.cpu()
+                x2 = x2.cpu()
+                
+                new_x1 = apply_transformations(x1, transforms_list_1)
+                new_x2 = apply_transformations(x2, transforms_list_2)
+                    
+            return (new_x1, new_x2)
     
     
     def __len__(self):

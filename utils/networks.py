@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 from torchvision.models import resnet18
+from itertools import permutations
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
@@ -209,9 +210,94 @@ class DecoderRNN(nn.Module):
         
         log_p = transform_log_p.reshape(batch_size, -1).sum(-1) + magnitude_log_p.reshape(batch_size, -1).sum(-1)
         log_p = log_p.unsqueeze(-1)
-    
+
+        # log_p.shape == (batch_size, 1)
+        # transform_actions_index.shape == (batch_size, 2, 4)
+        # magnitude_actions_index.shape == (batch_size, 2, 4)
+        # transform_entropy.shape == ()
+        # magnitude_entropy.shape == ()
+        
         return (
                 log_p,
                 (transform_actions_index, magnitude_actions_index),
                 (transform_entropy, magnitude_entropy)
             )
+        
+        
+        
+
+class DecoderNoInput(nn.Module):
+    def __init__(self,
+            num_transforms,
+            num_discrete_magnitude,
+            device
+            ):
+        super().__init__()
+    
+    #save the model param
+
+        self.num_transforms = num_transforms
+        self.num_discrete_magnitude = num_discrete_magnitude
+        self.seq_length = num_transforms
+        self.device = device
+        
+        self.permutations = torch.tensor(
+            list(permutations(range(4)))
+            ).to(device)
+        
+        self.num_transforms_permutations = len(self.permutations)
+        self.num_actions = num_transforms * num_discrete_magnitude
+        
+        self.model = nn.Sequential(
+            nn.Linear(1, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 2 * self.num_actions + 2 * self.num_transforms_permutations),
+        )
+        
+        
+    def forward(self, batch_size, old_action_index=None):
+        
+        x = torch.zeros((batch_size,1), dtype=torch.float32).to(self.device)
+        
+        output = self.model(x)
+        
+        magnitude_logits = output[:, :2 * self.num_actions]
+        permutations_logits = output[:, 2 * self.num_actions:]
+        
+        magnitude_logits = magnitude_logits.reshape(batch_size, 2, self.num_transforms, self.num_discrete_magnitude)
+        permutations_logits = permutations_logits.reshape(batch_size, 2, self.num_transforms_permutations)
+        
+        magnitude_dist = torch.distributions.Categorical(logits=magnitude_logits)
+        permutations_dist = torch.distributions.Categorical(logits=permutations_logits)
+        
+        if old_action_index is None:
+            magnitude_actions_index = magnitude_dist.sample()
+            permutations_index = permutations_dist.sample()
+        else:
+            transform_actions_index, magnitude_actions_index = old_action_index
+            matches = torch.all(transform_actions_index.unsqueeze(0) == self.permutations.unsqueeze(1).unsqueeze(1), dim=-1) * 1
+            permutations_index = torch.argmax(matches, dim=0)
+            magnitude_actions_index = magnitude_actions_index
+                
+        magnitude_log_p = F.log_softmax(magnitude_logits, dim=-1).gather(-1, magnitude_actions_index.unsqueeze(-1)).reshape(batch_size, -1).sum(-1, keepdim=True)
+        permutation_log_p = F.log_softmax(permutations_logits, dim=-1).gather(-1, permutations_index.unsqueeze(-1)).reshape(batch_size, -1).sum(-1, keepdim=True)
+        
+        log_p = magnitude_log_p + permutation_log_p
+        transform_actions_index = self.permutations[permutations_index]
+        magnitude_actions_index = magnitude_actions_index
+        transform_entropy = permutations_dist.entropy().mean()
+        magnitude_entropy = magnitude_dist.entropy().mean()
+        
+        # print(log_p.shape)
+        # print(transform_actions_index.shape)
+        # print(magnitude_actions_index.shape)
+        # print(transform_entropy.shape)
+        # print(magnitude_entropy.shape)
+        
+        return (
+                log_p,
+                (transform_actions_index, magnitude_actions_index),
+                (transform_entropy, magnitude_entropy)
+            )        
