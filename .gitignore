@@ -1,6 +1,7 @@
 .neptune/**
 dataset/**
 params/**
+params_/**
 scripts/**
 jobs_logs/**
 utils/__pycache__/**

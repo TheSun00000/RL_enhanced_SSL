@@ -42,7 +42,6 @@ def build_resnet18():
 
 
 
-
 class DecoderRNN(nn.Module):
     def __init__(
             self,
@@ -127,9 +126,6 @@ class DecoderRNN(nn.Module):
         #get the seq length to iterate
         seq_length = self.seq_length
         batch_size = z1.size(0)
-                
-        # Initialize LSTM state
-        h_t, c_t = self.init_hidden_state(batch_size)  # (batch_size, decoder_dim)
         
         transform_log_p =  torch.zeros(batch_size, 2, seq_length).to(device)
         transform_actions_index =  torch.zeros(batch_size, 2, seq_length, dtype=torch.long).to(device)
@@ -149,6 +145,9 @@ class DecoderRNN(nn.Module):
 
         transform_entropy = 0
         magnitude_entropy = 0
+        
+        # Initialize LSTM state
+        h_t, c_t = self.init_hidden_state(batch_size)  # (batch_size, decoder_dim)
         
         for branch in range(2):
 
@@ -207,10 +206,12 @@ class DecoderRNN(nn.Module):
 
         transform_entropy /= (2*seq_length)
         magnitude_entropy /= (2*seq_length)
+        
+        log_p = transform_log_p.reshape(batch_size, -1).sum(-1) + magnitude_log_p.reshape(batch_size, -1).sum(-1)
+        log_p = log_p.unsqueeze(-1)
     
         return (
-                (transform_actions_index, transform_log_p),
-                (magnitude_actions_index, magnitude_log_p),
+                log_p,
+                (transform_actions_index, magnitude_actions_index),
                 (transform_entropy, magnitude_entropy)
-            )       
-  
+            )

@@ -217,7 +217,7 @@ config = {
     'ppo_update_bs':256,
     'ppo_update_epochs':4,
     
-    'logs':True,
+    'logs':False,
     'model_save_path':model_save_path
     
 }
@@ -249,8 +249,7 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
         optimizer=simclr_optimizer, 
         scheduler=simclr_scheduler, 
         criterion=simclr_criterion, 
-        # ppo_transform=False if step == 0 else True,
-        ppo_transform=False,
+        ppo_transform=False if step == 0 else True,
         logs=logs,
         neptune_run=neptune_run
     )
@@ -261,19 +260,19 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
 
     
     
-    # trajectory, (img1, img2, new_img1, new_img2), (ppo_losses, ppo_rewards) = ppo_round(
-    #     encoder, 
-    #     decoder,
-    #     ppo_optimizer,
-    #     ppo_rounds=config['ppo_iterations'],
-    #     len_trajectory=config['ppo_len_trajectory'], 
-    #     batch_size=config['ppo_collection_bs'], 
-    #     ppo_epochs=config['ppo_update_epochs'], 
-    #     ppo_batch_size=config['ppo_update_bs'],
-    #     logs=logs,
-    #     neptune_run=neptune_run
-    # )
-    # ppo_rewards_metric += ppo_rewards
+    trajectory, (img1, img2, new_img1, new_img2), (ppo_losses, ppo_rewards) = ppo_round(
+        encoder, 
+        decoder,
+        ppo_optimizer,
+        ppo_rounds=config['ppo_iterations'],
+        len_trajectory=config['ppo_len_trajectory'], 
+        batch_size=config['ppo_collection_bs'], 
+        ppo_epochs=config['ppo_update_epochs'], 
+        ppo_batch_size=config['ppo_update_bs'],
+        logs=logs,
+        neptune_run=neptune_run
+    )
+    ppo_rewards_metric += ppo_rewards
     
     
     

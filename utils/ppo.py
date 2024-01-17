@@ -30,8 +30,7 @@ def collect_trajectories(len_trajectory, encoder, decoder, batch_size, logs, nep
 
     stored_z1 = torch.zeros((len_trajectory, encoder_dim))
     stored_z2 = torch.zeros((len_trajectory, encoder_dim))
-    stored_transform_log_p = torch.zeros((len_trajectory, 2, decoder.seq_length))
-    stored_magnitude_log_p = torch.zeros((len_trajectory, 2, decoder.seq_length))
+    stored_log_p = torch.zeros((len_trajectory, 1))
     stored_transform_actions_index  = torch.zeros((len_trajectory, 2, decoder.seq_length), dtype=torch.long)
     stored_magnitude_actions_index  = torch.zeros((len_trajectory, 2, decoder.seq_length), dtype=torch.long)
     stored_rewards = torch.zeros((len_trajectory,))
@@ -52,11 +51,9 @@ def collect_trajectories(len_trajectory, encoder, decoder, batch_size, logs, nep
             _, z2 = encoder(img2)
 
         with torch.no_grad():
-            transform_preds, magnitude_preds, entropies = decoder(z1, z2)
-            transform_actions_index, transform_log_p = transform_preds
-            magnitude_actions_index, magnitude_log_p = magnitude_preds
+            log_p, actions_index, entropies = decoder(z1, z2)
+            transform_actions_index, magnitude_actions_index = actions_index
             transform_entropy, magnitude_entropy = entropies
-
 
         transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
         new_img1 = apply_transformations(img1, transforms_list_1)
@@ -75,11 +72,9 @@ def collect_trajectories(len_trajectory, encoder, decoder, batch_size, logs, nep
         
         stored_z1[begin:end] = z1.detach().cpu()
         stored_z2[begin:end] = z1.detach().cpu()
-        stored_transform_log_p[begin:end] = transform_log_p.detach().cpu()
-        stored_magnitude_log_p[begin:end] = magnitude_log_p.detach().cpu()
+        stored_log_p[begin:end] = log_p.detach().cpu()
         stored_transform_actions_index[begin:end]  = transform_actions_index.detach().cpu()
         stored_magnitude_actions_index[begin:end]  = magnitude_actions_index.detach().cpu()
-        # stored_rewards[begin:end] = (new_img1 - new_img2).reshape(batch_size, -1).mean(axis=1)
         stored_rewards[begin:end] = reward
         
         if logs:
@@ -94,7 +89,7 @@ def collect_trajectories(len_trajectory, encoder, decoder, batch_size, logs, nep
 
     return (
             (stored_z1, stored_z2), 
-            (stored_transform_log_p, stored_magnitude_log_p),
+            (stored_log_p),
             (stored_transform_actions_index, stored_magnitude_actions_index),
             stored_rewards
         ), (img1, img2, new_img1, new_img2)
@@ -104,7 +99,7 @@ def shuffle_trajectory(trajectory):
 
     (
         (stored_z1, stored_z2), 
-        (stored_transform_log_p, stored_magnitude_log_p),
+        (stored_log_p),
         (stored_transform_actions_index, stored_magnitude_actions_index),
         stored_rewards
     ) = trajectory
@@ -113,15 +108,14 @@ def shuffle_trajectory(trajectory):
 
     permuted_stored_z1 = stored_z1[permutation]
     permuted_stored_z2 = stored_z2[permutation]
-    permuted_stored_transform_log_p = stored_transform_log_p[permutation]
-    permuted_stored_magnitude_log_p = stored_magnitude_log_p[permutation]
+    permuted_stored_log_p = stored_log_p[permutation]
     permuted_stored_transform_actions_index  = stored_transform_actions_index[permutation]
     permuted_stored_magnitude_actions_index  = stored_magnitude_actions_index[permutation]
     permuted_stored_rewards = stored_rewards[permutation]
 
     permuted_trajectory = (
         (permuted_stored_z1, permuted_stored_z2),
-        (permuted_stored_transform_log_p, permuted_stored_magnitude_log_p),
+        (permuted_stored_log_p),
         (permuted_stored_transform_actions_index, permuted_stored_magnitude_actions_index),
         permuted_stored_rewards
     )
@@ -138,7 +132,7 @@ def ppo_update(trajectory, decoder, optimizer, ppo_batch_size=256, ppo_epochs=4)
 
         (
             (stored_z1, stored_z2), 
-            (stored_transform_log_p, stored_magnitude_log_p),
+            (permuted_stored_log_p),
             (stored_transform_actions_index, stored_magnitude_actions_index),
             stored_rewards
         ) = shuffled_trajectory
@@ -157,29 +151,22 @@ def ppo_update(trajectory, decoder, optimizer, ppo_batch_size=256, ppo_epochs=4)
 
             z1 = stored_z1[begin:end].to(device).detach()
             z2 = stored_z2[begin:end].to(device).detach()
-            old_transform_log_p = stored_transform_log_p[begin:end].to(device).detach()
-            old_magnitude_log_p = stored_magnitude_log_p[begin:end].to(device).detach()
+            old_log_p = permuted_stored_log_p[begin:end].to(device).detach()
             transform_actions_index = stored_transform_actions_index[begin:end].to(device).detach()
             magnitude_actions_index = stored_magnitude_actions_index[begin:end].to(device).detach()
             reward = stored_rewards[begin:end].to(device).detach()
 
-            new_transform_preds, new_magnitude_preds, entropies = decoder(z1, z2, old_action_index=(transform_actions_index, magnitude_actions_index))
-            new_transform_actions_index, new_transform_log_p = new_transform_preds
-            new_magnitude_actions_index, new_magnitude_log_p = new_magnitude_preds
+            new_log_p, new_actions_index, entropies = decoder(z1, z2, old_action_index=(transform_actions_index, magnitude_actions_index))
+            new_transform_actions_index, new_magnitude_actions_index = new_actions_index
             
             assert (transform_actions_index == new_transform_actions_index).all()
             assert (magnitude_actions_index == new_magnitude_actions_index).all()
-
-            old_log_p = torch.cat((old_transform_log_p, old_magnitude_log_p), dim=-1)
-            new_log_p = torch.cat((new_transform_log_p, new_magnitude_log_p), dim=-1)
-
-            old_log_p = old_log_p.reshape(ppo_batch_size, -1)
-            new_log_p = new_log_p.reshape(ppo_batch_size, -1)
+            
+            reward, new_log_p, old_log_p = reward.reshape(-1), new_log_p.reshape(-1), old_log_p.reshape(-1)
 
         
             advantage = reward
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
-            advantage = advantage.unsqueeze(-1)
             ratio = torch.exp(new_log_p - old_log_p.detach())
 
             surr1 = ratio * advantage
@@ -187,6 +174,11 @@ def ppo_update(trajectory, decoder, optimizer, ppo_batch_size=256, ppo_epochs=4)
             actor_loss = - torch.min(surr1, surr2).mean()
 
             loss = actor_loss
+
+            # print('old_log_p', old_log_p.shape)
+            # print('advantage', advantage.shape)
+            # print('ratio', ratio.shape)
+            # print('torch.min(surr1, surr2)', torch.min(surr1, surr2).shape)
 
             optimizer.zero_grad()
             loss.backward()

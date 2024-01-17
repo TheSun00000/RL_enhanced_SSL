@@ -73,7 +73,7 @@ class DataLoaderWrapper:
             _, z1 = self.encoder(x1)
             _, z2 = self.encoder(x2)
 
-            ((transform_actions_index, _), (magnitude_actions_index, _), _) = self.decoder(z1, z2)
+            (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(z1, z2)
 
             transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
             
@@ -114,7 +114,7 @@ class DataLoaderWrapper:
                 if transform:
                     x = self.decoder_transform(x)
                 yield x
-        
+          
 
 
 def get_cifar10_dataloader(num_steps, batch_size, transform=False, encoder=None, decoder=None):
