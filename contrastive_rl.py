@@ -67,8 +67,6 @@ def ppo_init(config):
         lr=0.001
     )
 
-    list(decoder.parameters())[-1]
-
     return decoder, optimizer
 
 
@@ -246,25 +244,25 @@ def contrastive_round(encoder, decoder, optimizer, scheduler, criterion, ppo_tra
     return (sim.cpu().detach(), losses, top_1_score, top_5_score, top_10_score)
 
 
-config = {
-    'iterations':100,
+# config = {
+#     'iterations':100,
     
-    'simclr_iterations':50,
-    'simclr_bs':1024,
-    'linear_eval_epochs':100,
+#     'simclr_iterations':50,
+#     'simclr_bs':1024,
+#     'linear_eval_epochs':100,
     
-    'ppo_decoder': 'no_input', # ['no_input', 'with_input']
-    'ppo_iterations':100,
-    'ppo_len_trajectory':512*4,
-    'ppo_collection_bs':512*2,
-    'ppo_update_bs':256,
-    'ppo_update_epochs':4,
+#     'ppo_decoder': 'no_input', # ['no_input', 'with_input']
+#     'ppo_iterations':100,
+#     'ppo_len_trajectory':512*4,
+#     'ppo_collection_bs':512*2,
+#     'ppo_update_bs':256,
+#     'ppo_update_epochs':4,
     
-    'logs':True,
-    'model_save_path':model_save_path,
-    'seed':seed,
+#     'logs':True,
+#     'model_save_path':model_save_path,
+#     'seed':seed,
     
-}
+# }
 
 
 config = {
@@ -274,7 +272,7 @@ config = {
     'simclr_bs':1024,
     'linear_eval_epochs':100,
     
-    'ppo_decoder': 'no_input', # ['no_input', 'with_input']
+    'ppo_decoder': 'with_input', # ['no_input', 'with_input']
     'ppo_iterations':100,
     'ppo_len_trajectory':512*4,
     'ppo_collection_bs':512*2,
@@ -318,6 +316,7 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
         scheduler=simclr_scheduler, 
         criterion=simclr_criterion, 
         ppo_transform=False if step == 0 else True,
+        # ppo_transform=False,
         neptune_run=neptune_run
     )
     crst_losses += losses
@@ -325,8 +324,9 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     crst_top_5_score += top_5_score
     crst_top_10_score += top_10_score
 
-    
-    
+
+    # decoder, ppo_optimizer = ppo_init(config)
+
     trajectory, (img1, img2, new_img1, new_img2), (ppo_losses, ppo_rewards) = ppo_round(
         encoder, 
         decoder,

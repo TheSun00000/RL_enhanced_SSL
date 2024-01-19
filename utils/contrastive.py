@@ -117,6 +117,7 @@ def linear_evaluation(encoder, num_epochs=10):
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(linear_eval_model.parameters(), lr=0.01, momentum=0.9)
     
+    print("[Linear Eval][Training]")
     # for epoch in tqdm(range(num_epochs), desc="[Linear Eval][Training]"):
     for epoch in range(num_epochs):
         linear_eval_model.train()
@@ -137,6 +138,7 @@ def linear_evaluation(encoder, num_epochs=10):
         correct = 0
         total = 0
         with torch.no_grad():
+            print("[Linear Eval][Train Eval]")
             # for features, labels in tqdm(features_train_dataloader, desc="[Linear Eval][Train Eval]"):
             for features, labels in features_train_dataloader:
                 features, labels = features.to(device), labels.to(device)
@@ -149,13 +151,15 @@ def linear_evaluation(encoder, num_epochs=10):
         
         correct = 0
         total = 0
-        # for features, labels in tqdm(features_test_dataloader, desc="[Linear Eval][Test Eval]"):
-        for features, labels in features_test_dataloader:
-            features, labels = features.to(device), labels.to(device)
-            outputs = linear_eval_model(features)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
+        with torch.no_grad():
+            print("[Linear Eval][Test Eval]")
+            # for features, labels in tqdm(features_test_dataloader, desc="[Linear Eval][Test Eval]"):
+            for features, labels in features_test_dataloader:
+                features, labels = features.to(device), labels.to(device)
+                outputs = linear_eval_model(features)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
         test_accuracy = (correct / total) * 100
     
     return train_accuracy, test_accuracy
