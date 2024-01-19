@@ -3,7 +3,7 @@ from torch.optim.lr_scheduler import LambdaLR
 import numpy as np
 from tqdm import tqdm
 from neptune.types import File
-
+import random
 
 from utils.datasets import get_cifar10_dataloader
 from utils.networks import DecoderRNN, DecoderNoInput, build_resnet18
@@ -15,6 +15,16 @@ from utils.ppo import (
     ppo_update_no_input,
 )
 from utils.logs import init_neptune, get_model_save_path
+
+
+seed = 42
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)  # if you are using multiple GPUs
+np.random.seed(seed)
+random.seed(seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -56,8 +66,6 @@ def ppo_init(config):
         decoder.parameters(),
         lr=0.001
     )
-
-    list(decoder.parameters())[-1]
 
     return decoder, optimizer
 
@@ -236,23 +244,44 @@ def contrastive_round(encoder, decoder, optimizer, scheduler, criterion, ppo_tra
     return (sim.cpu().detach(), losses, top_1_score, top_5_score, top_10_score)
 
 
+# config = {
+#     'iterations':100,
+    
+#     'simclr_iterations':50,
+#     'simclr_bs':1024,
+#     'linear_eval_epochs':100,
+    
+#     'ppo_decoder': 'no_input', # ['no_input', 'with_input']
+#     'ppo_iterations':100,
+#     'ppo_len_trajectory':512*4,
+#     'ppo_collection_bs':512*2,
+#     'ppo_update_bs':256,
+#     'ppo_update_epochs':4,
+    
+#     'logs':True,
+#     'model_save_path':model_save_path,
+#     'seed':seed,
+    
+# }
+
 
 config = {
     'iterations':100,
     
     'simclr_iterations':50,
-    'simclr_bs':10,
+    'simclr_bs':1024,
     'linear_eval_epochs':100,
     
-    'ppo_decoder': 'no_input', # ['no_input', 'with_input']
+    'ppo_decoder': 'with_input', # ['no_input', 'with_input']
     'ppo_iterations':100,
-    'ppo_len_trajectory':10,
-    'ppo_collection_bs':10,
-    'ppo_update_bs':10,
+    'ppo_len_trajectory':512*4,
+    'ppo_collection_bs':512*2,
+    'ppo_update_bs':256,
     'ppo_update_epochs':4,
     
-    'logs':False,
-    'model_save_path':model_save_path
+    'logs':True,
+    'model_save_path':model_save_path,
+    'seed':seed,
     
 }
 
@@ -274,6 +303,8 @@ crst_top_10_score = []
 logs = config['logs']
 neptune_run = init_neptune(['contrastive_rl'] + [f'{k}={v}' for (k, v) in config.items()]) if logs else None
 
+if logs:
+    neptune_run["scripts"].upload_files(["./utils/*.py", "./*.py"])
 
 for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
         
@@ -284,8 +315,8 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
         optimizer=simclr_optimizer, 
         scheduler=simclr_scheduler, 
         criterion=simclr_criterion, 
-        # ppo_transform=False if step == 0 else True,
-        ppo_transform=True,
+        ppo_transform=False if step == 0 else True,
+        # ppo_transform=False,
         neptune_run=neptune_run
     )
     crst_losses += losses
@@ -293,8 +324,9 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     crst_top_5_score += top_5_score
     crst_top_10_score += top_10_score
 
-    
-    
+
+    # decoder, ppo_optimizer = ppo_init(config)
+
     trajectory, (img1, img2, new_img1, new_img2), (ppo_losses, ppo_rewards) = ppo_round(
         encoder, 
         decoder,
@@ -306,26 +338,26 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     
     
     
-    # torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
-    # torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
-    # torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
-    # torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
-    # torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
+    torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
+    torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
+    torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
+    torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
+    torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
     
     
-    # if logs:
-    #     neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
-    #     neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
-    #     neptune_run["params/encoder_shd"].upload(f'{model_save_path}/encoder_shd.pt')
-    #     neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
-    #     neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
+    if logs:
+        neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
+        neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
+        neptune_run["params/encoder_shd"].upload(f'{model_save_path}/encoder_shd.pt')
+        neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
+        neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
     
     
-    # train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
+    train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
     
-    # if logs:
-    #     neptune_run["linear_eval/train_acc"].append(train_acc)
-    #     neptune_run["linear_eval/test_acc"] .append(test_acc)
+    if logs:
+        neptune_run["linear_eval/train_acc"].append(train_acc)
+        neptune_run["linear_eval/test_acc"] .append(test_acc)
     
 
 if logs:
