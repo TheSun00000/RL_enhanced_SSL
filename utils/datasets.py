@@ -22,7 +22,7 @@ cifar10_dataset = torchvision.datasets.CIFAR10('dataset', download=True)
 
 
 class MyDatset(Dataset):
-    def __init__(self, train_dataset, transform):
+    def __init__(self, train_dataset):
         self.train_dataset = train_dataset
         self.to_tensor = transforms.ToTensor()
 
@@ -38,12 +38,13 @@ class MyDatset(Dataset):
     
 
 class DataLoaderWrapper:
-    def __init__(self, dataloder, steps, encoder, decoder, random_p):
+    def __init__(self, dataloder, steps, encoder, decoder, random_p, spatial_only):
         self.dataloder = dataloder
         self.steps = steps
         self.encoder = encoder
         self.decoder = decoder
         self.random_p = random_p
+        self.spatial_only = spatial_only
         
         self.random_transformation = self.transform = transforms.Compose([
                 transforms.ToPILImage(),
@@ -72,6 +73,12 @@ class DataLoaderWrapper:
         
         x1, x2 = x        
         
+        if self.spatial_only:
+            x1 = torch.stack([self.random_spatial_transformation(tensor) for tensor in x1])
+            x2 = torch.stack([self.random_spatial_transformation(tensor) for tensor in x2])
+            return x1, x2
+        
+        
         random_x1, decoder_x1 = x1[:num_random_samples], x1[num_random_samples:]
         random_x2, decoder_x2 = x2[:num_random_samples], x2[num_random_samples:]
 
@@ -80,41 +87,32 @@ class DataLoaderWrapper:
             random_x2 = torch.stack([self.random_transformation(tensor) for tensor in random_x2])
         
         if num_decoder_samples != 0:
-            img = decoder_x1[0]
-            self.random_spatial_transformation(img)
             decoder_x1 = torch.stack([self.random_spatial_transformation(tensor) for tensor in decoder_x1])
             decoder_x2 = torch.stack([self.random_spatial_transformation(tensor) for tensor in decoder_x2])
 
 
-
-        if (num_decoder_samples != 0) and isinstance(self.decoder, DecoderRNN):
-            decoder_x1 = decoder_x1.to(device)
-            decoder_x2 = decoder_x2.to(device)
-
-            with torch.no_grad():
-                _, z1 = self.encoder(decoder_x1)
-                _, z2 = self.encoder(decoder_x2)
-                (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(z1, z2)
-                transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
-                decoder_x1 = decoder_x1.cpu()
-                decoder_x2 = decoder_x2.cpu()
-                decoder_x1 = apply_transformations(decoder_x1, transforms_list_1)
-                decoder_x2 = apply_transformations(decoder_x2, transforms_list_2)
-                            
-        
-        elif (num_decoder_samples != 0) and isinstance(self.decoder, DecoderNoInput):
+        if (num_decoder_samples != 0):
+            if isinstance(self.decoder, DecoderRNN):
+                decoder_x1 = decoder_x1.to(device)
+                decoder_x2 = decoder_x2.to(device)
+                with torch.no_grad():
+                    _, z1 = self.encoder(decoder_x1)
+                    _, z2 = self.encoder(decoder_x2)
+                    (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(z1, z2)
+                    
+            elif isinstance(self.decoder, DecoderNoInput):
+                with torch.no_grad():
+                    (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(num_decoder_samples)
             
-            with torch.no_grad():
-                (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(decoder_x1.shape[0])
-                transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
-                decoder_x1 = decoder_x1.cpu()
-                decoder_x2 = decoder_x2.cpu()
-                decoder_x1 = apply_transformations(decoder_x1, transforms_list_1)
-                decoder_x2 = apply_transformations(decoder_x2, transforms_list_2)
+            
+            transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
+            decoder_x1 = apply_transformations(decoder_x1.cpu(), transforms_list_1)
+            decoder_x2 = apply_transformations(decoder_x2.cpu(), transforms_list_2)
                     
         
         new_x1 = torch.cat((random_x1, decoder_x1))
-        new_x2 = torch.cat((random_x2, decoder_x2))        
+        new_x2 = torch.cat((random_x2, decoder_x2))
+              
         return (new_x1, new_x2)
         
     
@@ -125,9 +123,7 @@ class DataLoaderWrapper:
             return self.steps
     
     def __iter__(self):
-        
-        transform = (self.encoder is not None) and (self.decoder is not None)
-        
+                
         iterator = iter(self.dataloder)
         if not self.steps in ['all', -1]:
             for i in range(self.steps):
@@ -147,14 +143,10 @@ class DataLoaderWrapper:
           
 
 
-def get_cifar10_dataloader(num_steps, batch_size, transform=False, encoder=None, decoder=None, random_p=0):
-    ppo_transform = (encoder is not None) and (decoder is not None)   
-    
-    assert ~transform and ~ppo_transform, 'cant use both random_transform and ppo_transform'
-    
-    
-    dataset = MyDatset(cifar10_dataset, transform)
+def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, random_p=0, spatial_only=False):
+        
+    dataset = MyDatset(cifar10_dataset)
     data_loader = DataLoader(dataset, batch_size=batch_size, drop_last=True, shuffle=True)
-    wrapped_data_loader = DataLoaderWrapper(data_loader, num_steps, encoder=encoder, decoder=decoder, random_p=random_p)
+    wrapped_data_loader = DataLoaderWrapper(data_loader, num_steps, encoder=encoder, decoder=decoder, random_p=random_p, spatial_only=spatial_only)
 
     return wrapped_data_loader

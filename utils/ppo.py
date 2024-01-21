@@ -22,7 +22,7 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     data_loader = get_cifar10_dataloader(
         num_steps=len_trajectory // batch_size,
         batch_size=batch_size,
-        transform=False
+        spatial_only=True,
     )
 
     encoder_dim = encoder.projector[2].out_features
@@ -35,6 +35,12 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     stored_magnitude_actions_index  = torch.zeros((len_trajectory, 2, decoder.seq_length), dtype=torch.long)
     stored_rewards = torch.zeros((len_trajectory,))
 
+    
+    mean_rewards = 0
+    mean_transform_entropy = 0
+    mean_magnitude_entropy = 0
+    
+    
     data_loader_iterator = iter(data_loader)
     for i in range(len_trajectory // batch_size):
 #     for i in tqdm(range(len_trajectory // batch_size), desc='collect_trajectories'):
@@ -49,8 +55,6 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         with torch.no_grad():
             _, z1 = encoder(img1)
             _, z2 = encoder(img2)
-
-        with torch.no_grad():
             log_p, actions_index, entropies = decoder(z1, z2)
             transform_actions_index, magnitude_actions_index = actions_index
             transform_entropy, magnitude_entropy = entropies
@@ -77,10 +81,19 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         stored_magnitude_actions_index[begin:end]  = magnitude_actions_index.detach().cpu()
         stored_rewards[begin:end] = reward
         
-        if logs:
-            neptune_run["ppo/reward"].append(reward.mean().item())
-            neptune_run["ppo/transform_entropy"].append(transform_entropy.item())
-            neptune_run["ppo/magnitude_entropy"].append(magnitude_entropy.item())
+        mean_rewards += reward.mean().item()
+        mean_transform_entropy += transform_entropy.item()
+        mean_magnitude_entropy += magnitude_entropy.item()
+
+    
+    mean_rewards /= (len_trajectory // batch_size)
+    mean_transform_entropy /= (len_trajectory // batch_size)
+    mean_magnitude_entropy /= (len_trajectory // batch_size)
+
+    if logs:
+        neptune_run["ppo/reward"].append(mean_rewards)
+        neptune_run["ppo/transform_entropy"].append(mean_transform_entropy)
+        neptune_run["ppo/magnitude_entropy"].append(mean_magnitude_entropy)
             
         
         
@@ -102,7 +115,7 @@ def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, 
     data_loader = get_cifar10_dataloader(
         num_steps=len_trajectory // batch_size,
         batch_size=batch_size,
-        transform=False
+        spatial_only=True,
     )
 
     encoder_dim = encoder.projector[2].out_features
