@@ -18,7 +18,7 @@ TRANSFORMS_DICT = [
 ]
 
 def get_transforms_list(actions_transform, actions_magnitude):
-
+    
     all_transform_lists = []
     for branch in range(actions_transform.size(1)):
         branch_transform_lists = []

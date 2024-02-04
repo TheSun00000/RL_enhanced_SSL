@@ -30,10 +30,10 @@ class MyDatset(Dataset):
         return len(self.train_dataset)
     
     def __getitem__(self, i):
-        img = self.train_dataset[i][0]
+        img, y = self.train_dataset[i][0], self.train_dataset[i][1]
         x1 = self.to_tensor(img)
         x2 = self.to_tensor(img)
-        return x1, x2
+        return (x1, x2), y
     
     
 
@@ -63,6 +63,8 @@ class DataLoaderWrapper:
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
             ])
+        
+        self.random_grayscale = transforms.RandomGrayscale(p=1)
     
     
     def decoder_transform(self, x):
@@ -106,9 +108,13 @@ class DataLoaderWrapper:
             
             
             transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
-            decoder_x1 = apply_transformations(decoder_x1.cpu(), transforms_list_1)
-            decoder_x2 = apply_transformations(decoder_x2.cpu(), transforms_list_2)
-                    
+            decoder_x1 = apply_transformations(decoder_x1, transforms_list_1)
+            decoder_x2 = apply_transformations(decoder_x2, transforms_list_2)
+            
+            decoder_x1 = torch.stack([self.random_grayscale(tensor) for tensor in decoder_x1])
+            decoder_x2 = torch.stack([self.random_grayscale(tensor) for tensor in decoder_x2])
+            
+        print(random_x1.shape, decoder_x1.shape)
         
         new_x1 = torch.cat((random_x1, decoder_x1))
         new_x2 = torch.cat((random_x2, decoder_x2))
@@ -128,18 +134,18 @@ class DataLoaderWrapper:
         if not self.steps in ['all', -1]:
             for i in range(self.steps):
                 try:
-                    x = next(iterator)
+                    x, y = next(iterator)
                 except StopIteration:
                     iterator = iter(self.dataloder)
-                    x = next(iterator)
+                    x, y = next(iterator)
                 
                 x = self.decoder_transform(x)
-                yield x
+                yield x, y
                 
         else: # self.steps in ['all', -1]
-            for x in iterator:
+            for x, y in iterator:
                 x = self.decoder_transform(x)
-                yield x
+                yield x, y
           
 
 

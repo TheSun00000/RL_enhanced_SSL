@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
-from torchvision.models import resnet18
+from torchvision.models import resnet18, resnet50
 from itertools import permutations
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -14,9 +14,15 @@ device
 
 
 class SimCLR(nn.Module):
-    def __init__(self, projection_dim=128):
+    def __init__(self, backbone, projection_dim=128):
         super(SimCLR, self).__init__()
-        self.enc = resnet18(weights=None)  # load model from torchvision.models without pretrained weights.
+        if backbone == 'resnet18':
+            self.enc = resnet18(weights=None)
+        elif backbone == 'resnet50':
+            self.enc = resnet50(weights=None)
+        else:
+            raise     
+            
         self.feature_dim = self.enc.fc.in_features
 
         # Customize for CIFAR10. Replace conv 7x7 with conv 3x3, and remove first max pooling.
@@ -38,12 +44,15 @@ class SimCLR(nn.Module):
     
     
 def build_resnet18():
-    return SimCLR()
+    return SimCLR('resnet18')
+
+def build_resnet50():
+    return SimCLR('resnet50')
 
 
 
 
-class DecoderRNN(nn.Module):
+class DecoderRNN_(nn.Module):
     def __init__(
             self,
             embed_size, 
@@ -223,8 +232,93 @@ class DecoderRNN(nn.Module):
                 (transform_entropy, magnitude_entropy)
             )
         
+
+
+
+
+class DecoderRNN(nn.Module):
+    def __init__(self,
+            num_transforms,
+            num_discrete_magnitude,
+            device
+            ):
+        super().__init__()
+    
+    #save the model param
+
+        self.num_transforms = num_transforms
+        self.num_discrete_magnitude = num_discrete_magnitude
+        self.seq_length = num_transforms
+        self.device = device
+        
+        self.permutations = torch.tensor(
+            list(permutations(range(4)))
+            ).to(device)
+        
+        self.num_transforms_permutations = len(self.permutations)
+        self.num_actions = num_transforms * num_discrete_magnitude
+        
+        self.model = nn.Sequential(
+            nn.Linear(128*3, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 2 * self.num_actions + 2 * self.num_transforms_permutations),
+        )
         
         
+    def forward(self, z1, z2, old_action_index=None):
+        
+        batch_size = z1.shape[0]
+        
+        x = torch.concat((z1, z2, z1-z2), dim=-1)
+        
+        output = self.model(x)
+        
+        magnitude_logits = output[:, :2 * self.num_actions]
+        permutations_logits = output[:, 2 * self.num_actions:]
+        
+        magnitude_logits = magnitude_logits.reshape(batch_size, 2, self.num_transforms, self.num_discrete_magnitude)
+        permutations_logits = permutations_logits.reshape(batch_size, 2, self.num_transforms_permutations)
+        
+        magnitude_dist = torch.distributions.Categorical(logits=magnitude_logits)
+        permutations_dist = torch.distributions.Categorical(logits=permutations_logits)
+        
+        if old_action_index is None:
+            magnitude_actions_index = magnitude_dist.sample()
+            permutations_index = permutations_dist.sample()
+        else:
+            transform_actions_index, magnitude_actions_index = old_action_index
+            matches = torch.all(transform_actions_index.unsqueeze(0) == self.permutations.unsqueeze(1).unsqueeze(1), dim=-1) * 1
+            permutations_index = torch.argmax(matches, dim=0)
+            magnitude_actions_index = magnitude_actions_index
+                
+        magnitude_log_p = F.log_softmax(magnitude_logits, dim=-1).gather(-1, magnitude_actions_index.unsqueeze(-1)).reshape(batch_size, -1).sum(-1, keepdim=True)
+        permutation_log_p = F.log_softmax(permutations_logits, dim=-1).gather(-1, permutations_index.unsqueeze(-1)).reshape(batch_size, -1).sum(-1, keepdim=True)
+        
+        log_p = magnitude_log_p + permutation_log_p
+        transform_actions_index = self.permutations[permutations_index]
+        magnitude_actions_index = magnitude_actions_index
+        transform_entropy = permutations_dist.entropy().mean()
+        magnitude_entropy = magnitude_dist.entropy().mean()
+        
+        # print(log_p.shape)
+        # print(transform_actions_index.shape)
+        # print(magnitude_actions_index.shape)
+        # print(transform_entropy.shape)
+        # print(magnitude_entropy.shape)
+        
+        return (
+                log_p,
+                (transform_actions_index, magnitude_actions_index),
+                (transform_entropy, magnitude_entropy)
+            )
+
+
+     
+    
 
 class DecoderNoInput(nn.Module):
     def __init__(self,
@@ -301,3 +395,5 @@ class DecoderNoInput(nn.Module):
                 (transform_actions_index, magnitude_actions_index),
                 (transform_entropy, magnitude_entropy)
             )        
+
+

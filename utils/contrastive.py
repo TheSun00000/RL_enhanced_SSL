@@ -10,12 +10,19 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
 device
 
+def get_negative_mask(batch_size):
+    negative_mask = torch.ones((batch_size, 2 * batch_size), dtype=bool)
+    for i in range(batch_size):
+        negative_mask[i, i] = 0
+        negative_mask[i, i + batch_size] = 0
 
+    negative_mask = torch.cat((negative_mask, negative_mask), 0)
+    return negative_mask
      
-class InfoNCELoss(nn.Module):
-    def __init__(self):
+class InfoNCELoss_(nn.Module):
+    def __init__(self, reduction='mean'):
         super(InfoNCELoss, self).__init__()
-        self.CE = nn.CrossEntropyLoss()
+        self.CE = nn.CrossEntropyLoss(reduction=reduction)
 
 
     def forward(self, z1, z2, temperature):
@@ -52,6 +59,44 @@ class InfoNCELoss(nn.Module):
     
 
 
+class InfoNCELoss(nn.Module):
+    def __init__(self, reduction='mean'):
+        super(InfoNCELoss, self).__init__()
+        self.CE = nn.CrossEntropyLoss(reduction=reduction)
+
+
+    def forward(self, z1, z2, temperature):
+        
+        batch_size = z1.shape[0]
+        
+        z1 = F.normalize(z1, dim=1)
+        z2 = F.normalize(z2, dim=1)
+        
+        # neg score
+        out = torch.cat([z1, z2], dim=0)
+        sim = torch.mm(out, out.t().contiguous())
+        neg = torch.exp( sim / temperature)
+        mask = get_negative_mask(batch_size).to(device)
+        neg = neg.masked_select(mask).view(2 * batch_size, -1)
+
+        # pos score
+        pos = torch.exp(torch.sum(z1 * z2, dim=-1) / temperature)
+        pos = torch.cat([pos, pos], dim=0)
+        
+        Ng = neg.sum(dim=-1)
+            
+        # contrastive loss
+        loss = (- torch.log(pos / (pos + Ng) )).mean()
+        
+        # print(sim.shape, loss)
+
+        return sim, None, loss
+    
+
+
+
+
+
 class FeaturesDataset:
         def __init__(self, x, y):
             self.x = x
@@ -76,12 +121,21 @@ class LinearClassifier(nn.Module):
 
 
 
-linear_eval_transform = transforms.Compose([
-        transforms.ToTensor(),
-    ])
 
-linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True, download=True, transform=linear_eval_transform)
-linear_eval_test_dataset = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=linear_eval_transform)
+linear_eval_train_transform = transforms.Compose([
+    transforms.RandomResizedCrop(32),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+    transforms.RandomGrayscale(p=0.2),
+    transforms.ToTensor(),
+])
+
+linear_eval_test_transform = transforms.Compose([
+    transforms.ToTensor(),
+])
+
+linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True, download=True, transform=linear_eval_train_transform)
+linear_eval_test_dataset = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=linear_eval_test_transform)
 
 
 def linear_evaluation(encoder, num_epochs=10):
@@ -113,7 +167,7 @@ def linear_evaluation(encoder, num_epochs=10):
     
     
     
-    linear_eval_model = LinearClassifier(512, num_classes=10).to(device)
+    linear_eval_model = LinearClassifier(encoder.feature_dim, num_classes=10).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(linear_eval_model.parameters(), lr=0.01, momentum=0.9)
     

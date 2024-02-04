@@ -1,18 +1,55 @@
 import torch
 import torch.nn.functional as F
+from torchvision import transforms
+from collections import Counter
+
+
 
 from utils.datasets import get_cifar10_dataloader
 from utils.transforms import (
     get_transforms_list,
     apply_transformations
 )
+from utils.contrastive import InfoNCELoss
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
 device
 
+random_grayscale = transforms.RandomGrayscale(p=1)
 
+infonce_reward = InfoNCELoss(reduction='none')
+
+def similariy_reward_function(new_z1, new_z2):
+    return - (F.normalize(new_z1) * F.normalize(new_z2)).sum(axis=-1)
+
+def infonce_reward_function(new_z1, new_z2):
+    bs = new_z1.shape[0]
+    full_similarity_matrix, logits, loss = infonce_reward(new_z1, new_z2, temperature=0.07)
+    reward = (loss[:bs] + loss[bs:]) / 2
+    return reward
+
+def test_reward_function(y, magnitude_actions_index):
+    # print(y.shape, magnitude_actions_index.shape)
+    
+    reward = (y.reshape(-1,1,1).to(device) == magnitude_actions_index)
+    reward = reward.reshape(y.shape[0], -1)
+    reward = reward.sum(dim=-1)
+
+    return reward * 1.
+
+
+def print_sorted_strings_with_counts(input_list, topk):
+    # Count occurrences of each string
+    string_counts = Counter(input_list)
+
+    # Sort strings by counts in descending order
+    sorted_strings = sorted(string_counts.items(), key=lambda x: x[1], reverse=True)[:topk]
+
+    # Print the sorted strings with counts
+    for i, (string, count) in enumerate(sorted_strings):
+        print(f"{i}) {string}: {count}")
 
 
 def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size, logs, neptune_run):
@@ -47,7 +84,7 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
 
         begin, end = i*batch_size, (i+1)*batch_size
 
-        img1, img2 = next(data_loader_iterator)
+        (img1, img2), y = next(data_loader_iterator)
 
         img1 = img1.to(device)
         img2 = img2.to(device)
@@ -63,6 +100,9 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         new_img1 = apply_transformations(img1, transforms_list_1)
         new_img2 = apply_transformations(img2, transforms_list_2)
 
+        new_img1 = torch.stack([random_grayscale(tensor) for tensor in new_img1])
+        new_img2 = torch.stack([random_grayscale(tensor) for tensor in new_img2])
+        
         new_img1 = new_img1.to(device)
         new_img2 = new_img2.to(device)
         with torch.no_grad():
@@ -72,7 +112,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         new_img2 = new_img2.to('cpu')
 
 
-        reward = - (F.normalize(new_z1) * F.normalize(new_z2)).sum(axis=-1)
+        reward = similariy_reward_function(new_z1, new_z2)
+        # reward = test_reward_function(y, magnitude_actions_index)
         
         stored_z1[begin:end] = z1.detach().cpu()
         stored_z2[begin:end] = z1.detach().cpu()
@@ -86,26 +127,29 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         mean_magnitude_entropy += magnitude_entropy.item()
 
     
+    string_transforms = []
+    for trans in transforms_list_1:
+        s = ' '.join([ f'{name}_{magnetude}' for (name, _, magnetude) in trans])
+        string_transforms.append( s )
+    # print_sorted_strings_with_counts(string_transforms, topk=5)
+    
     mean_rewards /= (len_trajectory // batch_size)
     mean_transform_entropy /= (len_trajectory // batch_size)
     mean_magnitude_entropy /= (len_trajectory // batch_size)
+    
+    entropy = (mean_transform_entropy + mean_magnitude_entropy) / 2
 
     if logs:
         neptune_run["ppo/reward"].append(mean_rewards)
         neptune_run["ppo/transform_entropy"].append(mean_transform_entropy)
         neptune_run["ppo/magnitude_entropy"].append(mean_magnitude_entropy)
-            
-        
-        
-        
-
 
     return (
             (stored_z1, stored_z2), 
             (stored_log_p),
             (stored_transform_actions_index, stored_magnitude_actions_index),
             stored_rewards
-        ), (img1, img2, new_img1, new_img2)
+        ), (img1, img2, new_img1, new_img2), entropy
 
 
 def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, logs, neptune_run):
@@ -128,13 +172,17 @@ def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, 
     stored_magnitude_actions_index  = torch.zeros((len_trajectory, 2, decoder.seq_length), dtype=torch.long)
     stored_rewards = torch.zeros((len_trajectory,))
 
+    mean_rewards = 0
+    mean_transform_entropy = 0
+    mean_magnitude_entropy = 0
+    
     data_loader_iterator = iter(data_loader)
     for i in range(len_trajectory // batch_size):
 #     for i in tqdm(range(len_trajectory // batch_size), desc='collect_trajectories'):
 
         begin, end = i*batch_size, (i+1)*batch_size
 
-        img1, img2 = next(data_loader_iterator)
+        (img1, img2), y = next(data_loader_iterator)
 
         with torch.no_grad():
             log_p, actions_index, entropies = decoder(batch_size)
@@ -142,8 +190,14 @@ def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, 
             transform_entropy, magnitude_entropy = entropies
 
         transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
+        
+        
+        
         new_img1 = apply_transformations(img1, transforms_list_1)
         new_img2 = apply_transformations(img2, transforms_list_2)
+        
+        new_img1 = torch.stack([random_grayscale(tensor) for tensor in new_img1])
+        new_img2 = torch.stack([random_grayscale(tensor) for tensor in new_img2])
 
         new_img1 = new_img1.to(device)
         new_img2 = new_img2.to(device)
@@ -154,31 +208,46 @@ def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, 
         new_img2 = new_img2.to('cpu')
 
 
-        reward = - (F.normalize(new_z1) * F.normalize(new_z2)).sum(axis=-1)
-        
+        reward = similariy_reward_function(new_z1, new_z2)
+        # reward = infonce_reward_function(new_z1, new_z2)
+                
         stored_z1[begin:end] = new_z1.detach().cpu()
         stored_z2[begin:end] = new_z2.detach().cpu()
         stored_log_p[begin:end] = log_p.detach().cpu()
         stored_transform_actions_index[begin:end]  = transform_actions_index.detach().cpu()
         stored_magnitude_actions_index[begin:end]  = magnitude_actions_index.detach().cpu()
         stored_rewards[begin:end] = reward
-        
-        if logs:
-            neptune_run["ppo/reward"].append(reward.mean().item())
-            neptune_run["ppo/transform_entropy"].append(transform_entropy.item())
-            neptune_run["ppo/magnitude_entropy"].append(magnitude_entropy.item())
             
-        
-        
-        
+        mean_rewards += reward.mean().item()
+        mean_transform_entropy += transform_entropy.item()
+        mean_magnitude_entropy += magnitude_entropy.item()
+    
+    
+    # transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
+    # string_transforms = []
+    # for trans in transforms_list_1:
+    #     s = ' '.join([ f'{name}_{magnetude}' for (name, _, magnetude) in trans])
+    #     string_transforms.append( s )
+    # print_sorted_strings_with_counts(string_transforms, topk=5)
+    
+    
+    mean_rewards /= (len_trajectory // batch_size)
+    mean_transform_entropy /= (len_trajectory // batch_size)
+    mean_magnitude_entropy /= (len_trajectory // batch_size)
+    
+    entropy = (mean_transform_entropy + mean_magnitude_entropy) / 2
 
+    if logs:
+        neptune_run["ppo/reward"].append(mean_rewards)
+        neptune_run["ppo/transform_entropy"].append(mean_transform_entropy)
+        neptune_run["ppo/magnitude_entropy"].append(mean_magnitude_entropy)
 
     return (
             (stored_z1, stored_z2), 
             (stored_log_p),
             (stored_transform_actions_index, stored_magnitude_actions_index),
             stored_rewards
-        ), (img1, img2, new_img1, new_img2)
+        ), (img1, img2, new_img1, new_img2), entropy
 
 
 
@@ -326,6 +395,8 @@ def ppo_update_no_input(trajectory, decoder, optimizer, ppo_batch_size=256, ppo_
             surr2 = torch.clamp(ratio, 1-0.2, 1+0.2) * advantage
             actor_loss = - torch.min(surr1, surr2).mean()
 
+            entropy_loss = (entropies[0] + entropies[1])/2
+            
             loss = actor_loss
 
             # print('old_log_p', old_log_p.shape)
