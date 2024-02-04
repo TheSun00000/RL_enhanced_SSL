@@ -96,7 +96,11 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
             transform_actions_index, magnitude_actions_index = actions_index
             transform_entropy, magnitude_entropy = entropies
 
-        transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
+        num_discrete_magnitude = decoder.num_discrete_magnitude
+        transforms_list_1, transforms_list_2 = get_transforms_list(
+            transform_actions_index,
+            magnitude_actions_index,
+            num_magnitudes=num_discrete_magnitude)
         new_img1 = apply_transformations(img1, transforms_list_1)
         new_img2 = apply_transformations(img2, transforms_list_2)
 
@@ -189,7 +193,11 @@ def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, 
             transform_actions_index, magnitude_actions_index = actions_index
             transform_entropy, magnitude_entropy = entropies
 
-        transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
+        num_discrete_magnitude = decoder.num_discrete_magnitude
+        transforms_list_1, transforms_list_2 = get_transforms_list(
+            transform_actions_index,
+            magnitude_actions_index,
+            num_magnitudes=num_discrete_magnitude)
         
         
         

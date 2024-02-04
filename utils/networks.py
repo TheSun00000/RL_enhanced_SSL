@@ -328,7 +328,7 @@ class DecoderNoInput(nn.Module):
             ):
         super().__init__()
     
-    #save the model param
+        #save the model param
 
         self.num_transforms = num_transforms
         self.num_discrete_magnitude = num_discrete_magnitude
@@ -379,16 +379,16 @@ class DecoderNoInput(nn.Module):
         permutation_log_p = F.log_softmax(permutations_logits, dim=-1).gather(-1, permutations_index.unsqueeze(-1)).reshape(batch_size, -1).sum(-1, keepdim=True)
         
         log_p = magnitude_log_p + permutation_log_p
+        
         transform_actions_index = self.permutations[permutations_index]
+        grayscale_tensor = torch.full_like(transform_actions_index[..., :1], transform_actions_index.max()+1)
+        transform_actions_index = torch.concat((transform_actions_index, grayscale_tensor), dim=-1)
+        
         magnitude_actions_index = magnitude_actions_index
+        
         transform_entropy = permutations_dist.entropy().mean()
         magnitude_entropy = magnitude_dist.entropy().mean()
         
-        # print(log_p.shape)
-        # print(transform_actions_index.shape)
-        # print(magnitude_actions_index.shape)
-        # print(transform_entropy.shape)
-        # print(magnitude_entropy.shape)
         
         return (
                 log_p,

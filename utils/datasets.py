@@ -137,16 +137,17 @@ class DataLoaderWrapper:
                 with torch.no_grad():
                     (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(num_decoder_samples)
             
-            
-            transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
+            num_discrete_magnitude = self.decoder.num_discrete_magnitude
+            transforms_list_1, transforms_list_2 = get_transforms_list(
+                transform_actions_index, 
+                magnitude_actions_index,
+                num_magnitudes=num_discrete_magnitude)
             decoder_x1 = apply_transformations(decoder_x1, transforms_list_1)
             decoder_x2 = apply_transformations(decoder_x2, transforms_list_2)
             
-            decoder_x1 = torch.stack([self.random_grayscale(tensor) for tensor in decoder_x1])
-            decoder_x2 = torch.stack([self.random_grayscale(tensor) for tensor in decoder_x2])
-            
-        print(random_x1.shape, decoder_x1.shape)
-        
+            # decoder_x1 = torch.stack([self.random_grayscale(tensor) for tensor in decoder_x1])
+            # decoder_x2 = torch.stack([self.random_grayscale(tensor) for tensor in decoder_x2])
+                    
         new_x1 = torch.cat((random_x1, decoder_x1))
         new_x2 = torch.cat((random_x2, decoder_x2))
               

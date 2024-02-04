@@ -59,7 +59,7 @@ def ppo_init(config):
         )
     elif config['ppo_decoder']  == 'no_input':
         decoder = DecoderNoInput(
-            num_transforms=4,
+            num_transforms=5,
             num_discrete_magnitude=10,
             device=device
         )
