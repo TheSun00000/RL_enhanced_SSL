@@ -14,6 +14,37 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device
 
 
+import matplotlib.pyplot as plt
+import numpy as np
+
+def plot_images_stacked(tensor1, tensor2):
+    # Check if the input tensors have the correct shape
+    expected_shape = (3, 32, 32)
+    if tensor1.shape[1:] != expected_shape or tensor2.shape[1:] != expected_shape:
+        raise ValueError("Input tensors must have shape (N, 3, 32, 32)")
+
+    # Set up the figure for subplots
+    fig, axes = plt.subplots(2, tensor1.shape[0], figsize=(tensor1.shape[0]*4, 8))
+
+    # Plot images from the first tensor
+    for image_index in range(tensor1.shape[0]):
+        image_data = tensor1[image_index].permute(1, 2, 0)  # Transpose to (32, 32, 3) for RGB
+        axes[0, image_index].imshow(image_data)
+        axes[0, image_index].axis('off')
+
+    # Plot images from the second tensor
+    for image_index in range(tensor2.shape[0]):
+        image_data = tensor2[image_index].permute(1, 2, 0)  # Transpose to (32, 32, 3) for RGB
+        axes[1, image_index].imshow(image_data)
+        axes[1, image_index].axis('off')
+
+    plt.show()
+
+
+# Example usage
+# Assuming you have a tensor named 'image_tensor'
+# plot_images(image_tensor)
+
 
 
 
