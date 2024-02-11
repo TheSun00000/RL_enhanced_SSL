@@ -1,118 +1,113 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
-from torchvision.models import resnet18
-
+import torch.nn.functional as F
+import torchvision
+from torchvision import transforms
+from torch.utils.data import  DataLoader
 from tqdm import tqdm
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
-
-torch.manual_seed(42)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(42)
+from utils.networks import build_resnet50
 
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+# device = 'cpu'
+device
 
-transform = transforms.Compose([
+linear_eval_train_transform = transforms.Compose([
+    transforms.RandomResizedCrop(32, ),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+    transforms.RandomGrayscale(p=0.2),
+    # transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2))], p=0.5),
     transforms.ToTensor(),
-    # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    # transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
 ])
 
-train_dataset = datasets.CIFAR10(root='dataset', train=True, download=True, transform=transform)
-train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True)
+linear_eval_test_transform = transforms.Compose([
+    transforms.ToTensor(),
+    # transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+])
 
-test_dataset = datasets.CIFAR10(root='dataset', train=True, download=True, transform=transform)
-test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=False)
+linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True, download=True, transform=linear_eval_train_transform)
+linear_eval_test_dataset = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=linear_eval_test_transform)
 
 
 class LinearClassifier(nn.Module):
-    def __init__(self, input_size, num_classes):
+    def __init__(self, encoder, num_classes):
         super(LinearClassifier, self).__init__()
-        self.fc = nn.Linear(input_size, num_classes)
+        self.encoder = encoder
+        self.fc = nn.Linear(encoder.feature_dim, num_classes, bias=True)
 
     def forward(self, x):
-        logits = self.fc(x)
-        return logits
-    
-    
-    
-class SimCLR(nn.Module):
-    def __init__(self, projection_dim=128):
-        super(SimCLR, self).__init__()
-        self.enc = resnet18(weights=None)  # load model from torchvision.models without pretrained weights.
-        self.feature_dim = self.enc.fc.in_features
+        x, _ = self.encoder(x)
+        return self.fc(x)
 
-        # Customize for CIFAR10. Replace conv 7x7 with conv 3x3, and remove first max pooling.
-        # See Section B.9 of SimCLR paper.
-        self.enc.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
-        self.enc.maxpool = nn.Identity()
-        self.enc.fc = nn.Identity()  # remove final fully connected layer.
 
-        # Add MLP projection.
-        self.projection_dim = projection_dim
-        self.projector = nn.Sequential(nn.Linear(self.feature_dim, 2048),
-                                       nn.ReLU(),
-                                       nn.Linear(2048, projection_dim))
+def train_val(net, data_loader, train_optimizer, epoch, epochs):
+        is_train = train_optimizer is not None
+        net.train() if is_train else net.eval()
+        
+        loss_criterion = nn.CrossEntropyLoss()
 
-    def forward(self, x):
-        feature = self.enc(x)
-        projection = self.projector(feature)
-        return feature, projection
+        total_loss, total_correct_1, total_correct_5, total_num, data_bar = 0.0, 0.0, 0.0, 0, tqdm(data_loader)
+        with (torch.enable_grad() if is_train else torch.no_grad()):
+            for data, target in data_bar:
+                data, target = data.to(device,non_blocking=True), target.to(device,non_blocking=True)
+                out = net(data)
+                loss = loss_criterion(out, target)
+
+                if is_train:
+                    train_optimizer.zero_grad()
+                    loss.backward()
+                    train_optimizer.step()
+
+                total_num += data.size(0)
+                total_loss += loss.item() * data.size(0)
+                prediction = torch.argsort(out, dim=-1, descending=True)
+                total_correct_1 += torch.sum((prediction[:, 0:1] == target.unsqueeze(dim=-1)).any(dim=-1).float()).item()
+                total_correct_5 += torch.sum((prediction[:, 0:5] == target.unsqueeze(dim=-1)).any(dim=-1).float()).item()
+                
+                data_bar.set_description('{} Epoch: [{}/{}] Loss: {:.4f} ACC@1: {:.2f}% ACC@5: {:.2f}%'
+                                        .format('Train' if is_train else 'Test', epoch, epochs, total_loss / total_num,
+                                                total_correct_1 / total_num * 100, total_correct_5 / total_num * 100))
+
+        return total_loss / total_num, total_correct_1 / total_num * 100, total_correct_5 / total_num * 100
+
+
+
+def linear_evaluation(encoder, epochs=100):
+
+    train_loader = DataLoader(linear_eval_train_dataset, batch_size=512, shuffle=True)
+    test_loader = DataLoader(linear_eval_test_dataset, batch_size=512, shuffle=False)
     
     
-def build_resnet18():
-    return SimCLR()
+    linear_eval_model = LinearClassifier(encoder, num_classes=10).to(device)
+    for param in linear_eval_model.encoder.parameters():
+        param.requires_grad = False
+    optimizer = torch.optim.SGD(linear_eval_model.parameters(), lr=0.01, momentum=0.9)
+    
+    for epoch in range(epochs):
+        train_loss, train_acc_1, train_acc_5 = train_val(linear_eval_model, train_loader, optimizer, epoch, epochs)
+        if epoch % 5 == 0:
+            test_loss, test_acc_1, test_acc_5 = train_val(linear_eval_model, test_loader, None, epoch, epochs)
+    
+    return
 
-encoder = build_resnet18()
-encoder.load_state_dict(torch.load('params/resnet18_contrastive.pt', map_location=device))
+
+
+
+
+
+
+
+
+
+
+
+
+encoder = build_resnet50()
+encoder.load_state_dict(torch.load('params/params_192/encoder.pt'))
 encoder = encoder.to(device)
 
 
-
-linear_eval_model = LinearClassifier(512, num_classes=10).to(device)
-
-# Set up loss function and optimizer
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(linear_eval_model.parameters(), lr=0.01, momentum=0.9)
-
-# Train the linear evaluation model
-num_epochs = 100
-
-for epoch in range(num_epochs):
-    linear_eval_model.train()
-
-    for inputs, labels in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
-        inputs, labels = inputs.to(device), labels.to(device)
-
-        # Forward pass
-        with torch.no_grad():
-            features, projections = encoder(inputs)
-        outputs = linear_eval_model(features)
-
-        # Compute loss and backpropagate
-        loss = criterion(outputs, labels)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        
-        
-        
-    if (epoch+1) % 5 == 0:
-        linear_eval_model.eval()
-        correct = 0
-        total = 0
-
-        with torch.no_grad():
-            for inputs, labels in tqdm(test_loader, desc="Evaluating"):
-                inputs, labels = inputs.to(device), labels.to(device)
-                features, projections = encoder(inputs)
-                outputs = linear_eval_model(features)
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
-
-        accuracy = correct / total
-        print(f"Linear evaluation accuracy on CIFAR-10: {accuracy * 100:.2f}%")
+linear_evaluation(encoder)

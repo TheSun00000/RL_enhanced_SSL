@@ -17,7 +17,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
 device
 
-random_grayscale = transforms.RandomGrayscale(p=1)
+# random_grayscale = transforms.RandomGrayscale(p=1)
 
 infonce_reward = InfoNCELoss(reduction='none')
 
@@ -26,7 +26,7 @@ def similariy_reward_function(new_z1, new_z2):
 
 def infonce_reward_function(new_z1, new_z2):
     bs = new_z1.shape[0]
-    full_similarity_matrix, logits, loss = infonce_reward(new_z1, new_z2, temperature=0.07)
+    full_similarity_matrix, logits, loss = infonce_reward(new_z1, new_z2, temperature=0.5)
     reward = (loss[:bs] + loss[bs:]) / 2
     return reward
 
@@ -104,8 +104,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         new_img1 = apply_transformations(img1, transforms_list_1)
         new_img2 = apply_transformations(img2, transforms_list_2)
 
-        new_img1 = torch.stack([random_grayscale(tensor) for tensor in new_img1])
-        new_img2 = torch.stack([random_grayscale(tensor) for tensor in new_img2])
+        # new_img1 = torch.stack([random_grayscale(tensor) for tensor in new_img1])
+        # new_img2 = torch.stack([random_grayscale(tensor) for tensor in new_img2])
         
         new_img1 = new_img1.to(device)
         new_img2 = new_img2.to(device)
@@ -192,6 +192,18 @@ def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, 
             log_p, actions_index, entropies = decoder(batch_size)
             transform_actions_index, magnitude_actions_index = actions_index
             transform_entropy, magnitude_entropy = entropies
+            
+            new_log_p, new_actions_index, new_entropies = decoder(batch_size, old_action_index=actions_index)
+            new_transform_actions_index, new_magnitude_actions_index = new_actions_index
+            new_transform_entropy, new_magnitude_entropy = new_entropies
+            
+            assert (log_p == new_log_p).all(), "haya yerham babak"
+            assert (transform_actions_index == new_transform_actions_index).all(), "haya yerham babak"
+            assert (magnitude_actions_index == new_magnitude_actions_index).all(), "haya yerham babak"
+            assert (transform_entropy == new_transform_entropy).all(), "haya yerham babak"
+            assert (magnitude_entropy == new_magnitude_entropy).all(), "haya yerham babak"
+            
+            
 
         num_discrete_magnitude = decoder.num_discrete_magnitude
         transforms_list_1, transforms_list_2 = get_transforms_list(
@@ -204,8 +216,8 @@ def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, 
         new_img1 = apply_transformations(img1, transforms_list_1)
         new_img2 = apply_transformations(img2, transforms_list_2)
         
-        new_img1 = torch.stack([random_grayscale(tensor) for tensor in new_img1])
-        new_img2 = torch.stack([random_grayscale(tensor) for tensor in new_img2])
+        # new_img1 = torch.stack([random_grayscale(tensor) for tensor in new_img1])
+        # new_img2 = torch.stack([random_grayscale(tensor) for tensor in new_img2])
 
         new_img1 = new_img1.to(device)
         new_img2 = new_img2.to(device)
@@ -216,8 +228,8 @@ def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, 
         new_img2 = new_img2.to('cpu')
 
 
-        reward = similariy_reward_function(new_z1, new_z2)
-        # reward = infonce_reward_function(new_z1, new_z2)
+        # reward = similariy_reward_function(new_z1, new_z2)
+        reward = infonce_reward_function(new_z1, new_z2)
                 
         stored_z1[begin:end] = new_z1.detach().cpu()
         stored_z2[begin:end] = new_z2.detach().cpu()
@@ -231,10 +243,14 @@ def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, 
         mean_magnitude_entropy += magnitude_entropy.item()
     
     
-    # transforms_list_1, transforms_list_2 = get_transforms_list(transform_actions_index, magnitude_actions_index)
+    # transforms_list_1, transforms_list_2 = get_transforms_list(
+    #     transform_actions_index, 
+    #     magnitude_actions_index,
+    #     num_magnitudes=decoder.num_discrete_magnitude
+    # )
     # string_transforms = []
     # for trans in transforms_list_1:
-    #     s = ' '.join([ f'{name}_{magnetude}' for (name, _, magnetude) in trans])
+    #     s = ' '.join([ f'{name}({magnetude})' for (name, _, magnetude) in trans])
     #     string_transforms.append( s )
     # print_sorted_strings_with_counts(string_transforms, topk=5)
     

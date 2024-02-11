@@ -23,7 +23,7 @@ TRANSFORMS_DICT = [
     ('contrast', vision_F.adjust_contrast, (0.6, 1.4)),
     ('saturation', vision_F.adjust_saturation, (0.6, 1.4)),
     ('hue', vision_F.adjust_hue, (-0.1, 0.1)),
-    ('gray', apply_grayscale_with_proba, (0, 0.5))
+    ('gray', apply_grayscale_with_proba, (0, 0.2))
 ]
 
 def split_interval(lower: float, upper: float, N: int):

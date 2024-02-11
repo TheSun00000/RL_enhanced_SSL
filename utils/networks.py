@@ -259,7 +259,7 @@ class DecoderRNN(nn.Module):
         self.num_actions = num_transforms * num_discrete_magnitude
         
         self.model = nn.Sequential(
-            nn.Linear(128*3, 1024),
+            nn.Linear(128, 1024),
             nn.ReLU(),
             nn.Linear(1024, 1024),
             nn.ReLU(),
@@ -269,12 +269,10 @@ class DecoderRNN(nn.Module):
         )
         
         
-    def forward(self, z1, z2, old_action_index=None):
+    def forward(self, x, old_action_index=None):
         
-        batch_size = z1.shape[0]
-        
-        x = torch.concat((z1, z2, z1-z2), dim=-1)
-        
+        batch_size = x.shape[0]
+                
         output = self.model(x)
         
         magnitude_logits = output[:, :2 * self.num_actions]
@@ -371,7 +369,7 @@ class DecoderNoInput(nn.Module):
             permutations_index = permutations_dist.sample()
         else:
             transform_actions_index, magnitude_actions_index = old_action_index
-            matches = torch.all(transform_actions_index.unsqueeze(0) == self.permutations.unsqueeze(1).unsqueeze(1), dim=-1) * 1
+            matches = torch.all(transform_actions_index[...,:4].unsqueeze(0) == self.permutations.unsqueeze(1).unsqueeze(1), dim=-1) * 1
             permutations_index = torch.argmax(matches, dim=0)
             magnitude_actions_index = magnitude_actions_index
                 

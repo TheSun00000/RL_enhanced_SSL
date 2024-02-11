@@ -9,6 +9,8 @@ from utils.transforms import (
     get_transforms_list
 )
 
+# import cv2
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
 device
@@ -77,25 +79,25 @@ class DataLoaderWrapper:
         self.random_p = random_p
         self.spatial_only = spatial_only
         
-        self.random_transformation = self.transform = transforms.Compose([
-                transforms.ToPILImage(),
-                transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomApply([
-                    transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
-                ], p=0.8),
-                transforms.RandomGrayscale(p=0.2),
-                transforms.ToTensor(),
-            ])
+        self.random_transformation = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.RandomResizedCrop(32),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.RandomApply([transforms.GaussianBlur(kernel_size=int(0.1*32), sigma=(0.1, 2))], p=0.5),
+            transforms.ToTensor(),
+            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        ])
         
-        self.random_spatial_transformation = self.transform = transforms.Compose([
-                transforms.ToPILImage(),
-                transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-            ])
+        self.random_spatial_transformation = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+        ])
         
-        self.random_grayscale = transforms.RandomGrayscale(p=1)
+        # self.random_grayscale = transforms.RandomGrayscale(p=1)
     
     
     def decoder_transform(self, x):

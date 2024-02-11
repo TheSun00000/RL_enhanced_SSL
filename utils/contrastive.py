@@ -62,6 +62,7 @@ class InfoNCELoss_(nn.Module):
 class InfoNCELoss(nn.Module):
     def __init__(self, reduction='mean'):
         super(InfoNCELoss, self).__init__()
+        self.reduction = reduction
         self.CE = nn.CrossEntropyLoss(reduction=reduction)
 
 
@@ -86,7 +87,9 @@ class InfoNCELoss(nn.Module):
         Ng = neg.sum(dim=-1)
             
         # contrastive loss
-        loss = (- torch.log(pos / (pos + Ng) )).mean()
+        loss = (- torch.log(pos / (pos + Ng) ))
+        if self.reduction == 'mean':
+            loss = loss.mean()
         
         # print(sim.shape, loss)
 
@@ -122,17 +125,30 @@ class LinearClassifier(nn.Module):
 
 
 
+# linear_eval_train_transform = transforms.Compose([
+#     transforms.RandomResizedCrop(32),
+#     transforms.RandomHorizontalFlip(p=0.5),
+#     transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+#     transforms.RandomGrayscale(p=0.2),
+#     transforms.ToTensor(),
+# ])
+
+# linear_eval_test_transform = transforms.Compose([
+#     transforms.ToTensor(),
+# ])
+
 linear_eval_train_transform = transforms.Compose([
     transforms.RandomResizedCrop(32),
     transforms.RandomHorizontalFlip(p=0.5),
     transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
     transforms.RandomGrayscale(p=0.2),
+    transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2))], p=0.5),
     transforms.ToTensor(),
-])
+    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
 
 linear_eval_test_transform = transforms.Compose([
     transforms.ToTensor(),
-])
+    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
 
 linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True, download=True, transform=linear_eval_train_transform)
 linear_eval_test_dataset = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=linear_eval_test_transform)
@@ -144,19 +160,20 @@ def linear_evaluation(encoder, num_epochs=10):
     test_loader = DataLoader(linear_eval_test_dataset, batch_size=1024, shuffle=False)
 
 
-    def extract_features(data_loader, encoder):
+    def extract_features(data_loader, encoder, epochs):
         features, labels = [], []
         # for images, labels_batch in tqdm(data_loader, desc='[Linear Eval][Features extraction]'):
-        for images, labels_batch in data_loader:
-            with torch.no_grad():
-                features_batch, projections_batch = encoder(images.to(device))
-            features.append(features_batch)
-            labels.append(labels_batch)
+        for epoch in tqdm(range(epochs)):
+            for images, labels_batch in data_loader:
+                with torch.no_grad():
+                    features_batch, projections_batch = encoder(images.to(device))
+                features.append(features_batch)
+                labels.append(labels_batch)
         return torch.cat(features, dim=0), torch.cat(labels, dim=0)
 
     # Extract features for linear evaluation
-    train_features, train_labels = extract_features(train_loader, encoder)
-    test_features, test_labels = extract_features(test_loader, encoder)
+    train_features, train_labels = extract_features(train_loader, encoder, epochs=1)
+    test_features, test_labels = extract_features(test_loader, encoder, epochs=1)
 
     
     features_train_dataset = FeaturesDataset(train_features, train_labels)
