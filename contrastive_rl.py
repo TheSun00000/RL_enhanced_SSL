@@ -85,7 +85,7 @@ def contrastive_init(config):
         encoder = build_resnet50()
     
     
-    # encoder.load_state_dict(torch.load('params/params_125/encoder.pt'))
+    # encoder.load_state_dict(torch.load('params/params_174/encoder.pt'))
     encoder = encoder.to(device)
 
     criterion = InfoNCELoss()
@@ -333,7 +333,7 @@ stop_ppo = False
 for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     
     # random_p = get_random_p(step, config['init_random_p'])
-    random_p = 0.5
+    random_p = 1.
     print('random_p:', step, random_p)
     
     (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
@@ -354,7 +354,7 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     #     neptune_run["linear_eval/train_acc"].append(train_acc)
     #     neptune_run["linear_eval/test_acc"] .append(test_acc)
 
-    if step % 4 == 0:
+    if step % 1 == 0:
         decoder, ppo_optimizer = ppo_init(config)
         trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
             encoder, 

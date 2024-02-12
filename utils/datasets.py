@@ -169,7 +169,7 @@ class DataLoaderWrapper:
         new_x1 = torch.cat((random_x1, decoder_x1))
         new_x2 = torch.cat((random_x2, decoder_x2))
                 
-        # plot_images_stacked(new_x1[:10], new_x2[:10])
+        # plot_images_stacked(decoder_x1[:10], decoder_x2[:10])
               
         return (new_x1, new_x2)
         

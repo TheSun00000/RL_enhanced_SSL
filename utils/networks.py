@@ -371,6 +371,11 @@ class DecoderNN_1input(nn.Module):
         *leading_dim, input_dim = x.shape                        
         output = self.model(x)
         
+        # print('-'*100)
+        # print(x.min(), x.max())
+        # print(output.min(), output.max())
+        # print('-'*100)
+        
         D = self.num_discrete_magnitude
         crop_position_offset = 0
         crop_area_offset = crop_position_offset + 2*D
@@ -398,7 +403,6 @@ class DecoderNN_1input(nn.Module):
         blur_sigma_logits = blur_sigma_logits.reshape(*leading_dim, 2, D)
         blur_proba_logits = blur_proba_logits.reshape(*leading_dim, 2, D)
         
-        
         crop_position_dist = torch.distributions.Categorical(logits=crop_position_logits)
         crop_area_dist = torch.distributions.Categorical(logits=crop_area_logits)
         color_magnitude_dist = torch.distributions.Categorical(logits=color_magnitude_logits)
@@ -406,6 +410,15 @@ class DecoderNN_1input(nn.Module):
         gray_proba_dist = torch.distributions.Categorical(logits=gray_proba_logits)
         blur_sigma_dist = torch.distributions.Categorical(logits=blur_sigma_logits)
         blur_proba_dist = torch.distributions.Categorical(logits=blur_proba_logits)
+        
+        # print('crop_position:', crop_position_dist.entropy().mean())
+        # print('crop_area:', crop_area_dist.entropy().mean())
+        # print('color_magnitude:', color_magnitude_dist.entropy().mean())
+        # print('color_permutation:', color_permutation_dist.entropy().mean())
+        # print('gray_proba:', gray_proba_dist.entropy().mean())
+        # print('blur_sigma:', blur_sigma_dist.entropy().mean())
+        # print('blur_proba:', blur_proba_dist.entropy().mean())
+        # print('------------------')
                 
         
         if old_action_index is None:
@@ -436,6 +449,7 @@ class DecoderNN_1input(nn.Module):
 
 
         log_p = (crop_position_log_p + crop_area_log_p) + (color_magnitude_log_p + color_permutation_log_p) + (gray_proba_log_p) + (blur_sigma_log_p + blur_proba_log_p)
+        log_p = (color_magnitude_log_p + color_permutation_log_p)
         
         actions_index = torch.concat((
             crop_position_index.unsqueeze(-1),

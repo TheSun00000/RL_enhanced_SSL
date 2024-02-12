@@ -113,15 +113,15 @@ TRANSFORMS_DICT = {
     'crop': {
         'function':crop_image,
         'position':None,
-        'area':(0.2, 1)
+        'area':(1, 1)
     },
     'gray': {
         'function':grayscale_image,
-        'proba':(0, 1)
+        'proba':(0, 0)
     },
     'blur': {
         'function':blur_image,
-        'proba':(0, 1),
+        'proba':(0, 0),
         'sigma':(0.1, 2)
     },
     'flip': {

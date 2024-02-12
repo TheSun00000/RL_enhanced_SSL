@@ -354,6 +354,7 @@ def ppo_update_with_input(trajectory, decoder, optimizer, ppo_batch_size=256, pp
             
             reward, new_log_p, old_log_p = reward.reshape(-1), new_log_p.reshape(-1), old_log_p.reshape(-1)
 
+            
         
             advantage = reward
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
@@ -364,6 +365,12 @@ def ppo_update_with_input(trajectory, decoder, optimizer, ppo_batch_size=256, pp
             actor_loss = - torch.min(surr1, surr2).mean()
 
             loss = actor_loss
+            
+            print('reward:', reward[:5].detach().cpu().numpy().tolist())
+            # print('advantage:', advantage[:5].detach().cpu().numpy().tolist())
+            # print('new_log_p:', new_log_p[:5].detach().cpu().numpy().tolist())
+            # print('old_log_p:', old_log_p[:5].detach().cpu().numpy().tolist())
+            print('ratio:', ratio[:5].detach().cpu().numpy().tolist())
 
             # print('old_log_p', old_log_p.shape)
             # print('advantage', advantage.shape)
