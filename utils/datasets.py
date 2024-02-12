@@ -3,7 +3,7 @@ import torchvision
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
-from utils.networks import DecoderNoInput, DecoderRNN
+from utils.networks import DecoderNoInput, DecoderNN_1input
 from utils.transforms import (
     apply_transformations,
     get_transforms_list
@@ -19,11 +19,25 @@ device
 import matplotlib.pyplot as plt
 import numpy as np
 
+def denormalize(tensor, mean, std):
+    mean = torch.tensor(mean).unsqueeze(1).unsqueeze(2)
+    std = torch.tensor(std).unsqueeze(1).unsqueeze(2)
+    denormalized_tensor = tensor * std + mean
+    denormalized_tensor.clamp_(0, 1)
+    return denormalized_tensor
+
+
 def plot_images_stacked(tensor1, tensor2):
     # Check if the input tensors have the correct shape
     expected_shape = (3, 32, 32)
     if tensor1.shape[1:] != expected_shape or tensor2.shape[1:] != expected_shape:
         raise ValueError("Input tensors must have shape (N, 3, 32, 32)")
+
+    # Denormalize tensors
+    mean = [0.4914, 0.4822, 0.4465]
+    std = [0.2023, 0.1994, 0.2010]
+    tensor1 = denormalize(tensor1, mean, std)
+    tensor2 = denormalize(tensor2, mean, std)
 
     # Set up the figure for subplots
     fig, axes = plt.subplots(2, tensor1.shape[0], figsize=(tensor1.shape[0]*4, 8))
@@ -64,9 +78,8 @@ class MyDatset(Dataset):
     
     def __getitem__(self, i):
         img, y = self.train_dataset[i][0], self.train_dataset[i][1]
-        x1 = self.to_tensor(img)
-        x2 = self.to_tensor(img)
-        return (x1, x2), y
+        x = self.to_tensor(img)
+        return x, y
     
     
 
@@ -81,7 +94,7 @@ class DataLoaderWrapper:
         
         self.random_transformation = transforms.Compose([
             transforms.ToPILImage(),
-            transforms.RandomResizedCrop(32),
+            transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
             transforms.RandomGrayscale(p=0.2),
@@ -90,68 +103,73 @@ class DataLoaderWrapper:
             transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
         ])
         
-        self.random_spatial_transformation = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-        ])
-        
-        # self.random_grayscale = transforms.RandomGrayscale(p=1)
+        self.normalization = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
     
     
     def decoder_transform(self, x):
-        
-        batch_size = x[0].shape[0]
+
+        batch_size = x.shape[0]
         num_random_samples = int(batch_size*self.random_p)
         num_decoder_samples = batch_size - num_random_samples
         
-        x1, x2 = x        
         
         if self.spatial_only:
-            x1 = torch.stack([self.random_spatial_transformation(tensor) for tensor in x1])
-            x2 = torch.stack([self.random_spatial_transformation(tensor) for tensor in x2])
-            return x1, x2
+            # x1 = torch.stack([self.random_spatial_transformation(tensor) for tensor in x1])
+            # x2 = torch.stack([self.random_spatial_transformation(tensor) for tensor in x2])
+            # return x1, x2
+            return x
         
+        random_x, decoder_x = x[:num_random_samples], x[num_random_samples:]
         
-        random_x1, decoder_x1 = x1[:num_random_samples], x1[num_random_samples:]
-        random_x2, decoder_x2 = x2[:num_random_samples], x2[num_random_samples:]
-
+        random_x1 = random_x
+        random_x2 = random_x
+        decoder_x1 = decoder_x
+        decoder_x2 = decoder_x
+        
         if num_random_samples != 0:
-            random_x1 = torch.stack([self.random_transformation(tensor) for tensor in random_x1])
-            random_x2 = torch.stack([self.random_transformation(tensor) for tensor in random_x2])
-        
-        if num_decoder_samples != 0:
-            decoder_x1 = torch.stack([self.random_spatial_transformation(tensor) for tensor in decoder_x1])
-            decoder_x2 = torch.stack([self.random_spatial_transformation(tensor) for tensor in decoder_x2])
+            random_x1 = torch.stack([self.random_transformation(tensor) for tensor in random_x])
+            random_x2 = torch.stack([self.random_transformation(tensor) for tensor in random_x])
 
 
         if (num_decoder_samples != 0):
-            if isinstance(self.decoder, DecoderRNN):
-                decoder_x1 = decoder_x1.to(device)
-                decoder_x2 = decoder_x2.to(device)
+            
+            if isinstance(self.decoder, DecoderNN_1input):
+                normalized_decoder_x = torch.stack([self.normalization(tensor) for tensor in decoder_x])
+                normalized_decoder_x = normalized_decoder_x.to(device)
                 with torch.no_grad():
-                    _, z1 = self.encoder(decoder_x1)
-                    _, z2 = self.encoder(decoder_x2)
-                    (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(z1, z2)
+                    _, z = self.encoder(normalized_decoder_x)
+                    (_, actions_index, _) = self.decoder(z)
+                num_discrete_magnitude = self.decoder.num_discrete_magnitude
+                transforms_list_1, transforms_list_2 = get_transforms_list(
+                    actions_index,
+                    num_magnitudes=num_discrete_magnitude
+                )
                     
             elif isinstance(self.decoder, DecoderNoInput):
                 with torch.no_grad():
                     (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(num_decoder_samples)
+                num_discrete_magnitude = self.decoder.num_discrete_magnitude
+                transforms_list_1, transforms_list_2 = get_transforms_list(
+                    transform_actions_index, 
+                    magnitude_actions_index,
+                    num_magnitudes=num_discrete_magnitude)
             
-            num_discrete_magnitude = self.decoder.num_discrete_magnitude
-            transforms_list_1, transforms_list_2 = get_transforms_list(
-                transform_actions_index, 
-                magnitude_actions_index,
-                num_magnitudes=num_discrete_magnitude)
             decoder_x1 = apply_transformations(decoder_x1, transforms_list_1)
             decoder_x2 = apply_transformations(decoder_x2, transforms_list_2)
-            
-            # decoder_x1 = torch.stack([self.random_grayscale(tensor) for tensor in decoder_x1])
-            # decoder_x2 = torch.stack([self.random_grayscale(tensor) for tensor in decoder_x2])
-                    
+
+            decoder_x1 = torch.stack([self.normalization(tensor) for tensor in decoder_x1])
+            decoder_x2 = torch.stack([self.normalization(tensor) for tensor in decoder_x2])
+        
+
+        # print(random_x1.min(), random_x1.max())
+        # print(random_x2.min(), random_x2.max())
+        # print(decoder_x1.min(), decoder_x1.max())
+        # print(decoder_x2.min(), decoder_x2.max())
+        
         new_x1 = torch.cat((random_x1, decoder_x1))
         new_x2 = torch.cat((random_x2, decoder_x2))
+                
+        # plot_images_stacked(new_x1[:10], new_x2[:10])
               
         return (new_x1, new_x2)
         

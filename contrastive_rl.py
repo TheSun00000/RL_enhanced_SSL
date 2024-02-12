@@ -6,7 +6,7 @@ from neptune.types import File
 import random
 
 from utils.datasets import get_cifar10_dataloader
-from utils.networks import DecoderRNN, DecoderNoInput, build_resnet18, build_resnet50
+from utils.networks import DecoderNN_1input, DecoderNoInput, build_resnet18, build_resnet50
 from utils.contrastive import InfoNCELoss, top_k_accuracy, linear_evaluation
 from utils.ppo import (
     collect_trajectories_with_input,
@@ -48,8 +48,8 @@ def ppo_init(config):
     # encoder = encoder.to(device)
 
     if config['ppo_decoder']  == 'with_input':
-        decoder = DecoderRNN(
-            num_transforms=4,
+        decoder = DecoderNN_1input(
+            num_transforms=5,
             num_discrete_magnitude=10,
             device=device
             # embed_size=1024,
@@ -176,16 +176,15 @@ def ppo_round(encoder, decoder, optimizer, config, neptune_run):
         
         tqdm_range.set_description(f'[ppo_round] Reward: {rewards[-1]:.4f}')
         
-    stored_transform_actions_index, stored_magnitude_actions_index = trajectory[2]
+    stored_actions_index = trajectory[2]
     transforms_list_1, transforms_list_2 = get_transforms_list(
-        stored_transform_actions_index, 
-        stored_magnitude_actions_index,
+        stored_actions_index,
         num_magnitudes=decoder.num_discrete_magnitude
     )
     string_transforms = []
     for trans1, trans2 in zip(transforms_list_1, transforms_list_2):
-        s1 = ' '.join([ f'{name[:3]}({magnetude})' for (name, _, magnetude) in trans1])
-        s2 = ' '.join([ f'{name[:3]}({magnetude})' for (name, _, magnetude) in trans2])
+        s1 = ' '.join([ f'{name[:4]}_{magnetude}' for (name, _, magnetude) in trans1])
+        s2 = ' '.join([ f'{name[:4]}_{magnetude}' for (name, _, magnetude) in trans2])
         string_transforms.append( f'{s1}  ||  {s2}' )
     print_sorted_strings_with_counts(string_transforms, topk=5)
         
@@ -296,20 +295,20 @@ def get_random_p(epoch, init_random_p):
 config = {
     'iterations':1000,
 
-    'simclr_iterations':'all',
-    'simclr_bs':256,
+    'simclr_iterations':5,
+    'simclr_bs':64,
     'linear_eval_epochs':200,
     'init_random_p':0.5,
     'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
     
-    'ppo_decoder': 'no_input', # ['no_input', 'with_input']
-    'ppo_iterations':200,
-    'ppo_len_trajectory':512*2,
-    'ppo_collection_bs':256,
-    'ppo_update_bs':128,
+    'ppo_decoder': 'with_input', # ['no_input', 'with_input']
+    'ppo_iterations':5,
+    'ppo_len_trajectory':16,
+    'ppo_collection_bs':16,
+    'ppo_update_bs':16,
     'ppo_update_epochs':4,
     
-    'logs':True,
+    'logs':False,
     'model_save_path':model_save_path,
     'seed':seed,
 }
@@ -334,7 +333,7 @@ stop_ppo = False
 for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     
     # random_p = get_random_p(step, config['init_random_p'])
-    random_p = 1
+    random_p = 0.5
     print('random_p:', step, random_p)
     
     (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
@@ -348,22 +347,22 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
         neptune_run=neptune_run
     )
     
-    if step % 1 == 0:
-        train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
+    # if step % 1 == 0:
+    #     train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
     
-    if logs:
-        neptune_run["linear_eval/train_acc"].append(train_acc)
-        neptune_run["linear_eval/test_acc"] .append(test_acc)
+    # if logs:
+    #     neptune_run["linear_eval/train_acc"].append(train_acc)
+    #     neptune_run["linear_eval/test_acc"] .append(test_acc)
 
-    # if step % 4 == 0:
-    #     decoder, ppo_optimizer = ppo_init(config)
-    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-    #         encoder, 
-    #         decoder,
-    #         ppo_optimizer,
-    #         config=config,
-    #         neptune_run=neptune_run
-    #     )
+    if step % 4 == 0:
+        decoder, ppo_optimizer = ppo_init(config)
+        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+            encoder, 
+            decoder,
+            ppo_optimizer,
+            config=config,
+            neptune_run=neptune_run
+        )
     
     
     

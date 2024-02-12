@@ -61,15 +61,15 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         batch_size=batch_size,
         spatial_only=True,
     )
+    
+    normalization = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
 
     encoder_dim = encoder.projector[2].out_features
 
 
-    stored_z1 = torch.zeros((len_trajectory, encoder_dim))
-    stored_z2 = torch.zeros((len_trajectory, encoder_dim))
+    stored_z = torch.zeros((len_trajectory, encoder_dim))
     stored_log_p = torch.zeros((len_trajectory, 1))
-    stored_transform_actions_index  = torch.zeros((len_trajectory, 2, decoder.seq_length), dtype=torch.long)
-    stored_magnitude_actions_index  = torch.zeros((len_trajectory, 2, decoder.seq_length), dtype=torch.long)
+    stored_actions_index  = torch.zeros((len_trajectory, 2, 10), dtype=torch.long)
     stored_rewards = torch.zeros((len_trajectory,))
 
     
@@ -84,28 +84,24 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
 
         begin, end = i*batch_size, (i+1)*batch_size
 
-        (img1, img2), y = next(data_loader_iterator)
-
-        img1 = img1.to(device)
-        img2 = img2.to(device)
+        img, y = next(data_loader_iterator)
+        normalized_img = torch.stack([normalization(tensor) for tensor in img])
+        normalized_img = normalized_img.to(device)
 
         with torch.no_grad():
-            _, z1 = encoder(img1)
-            _, z2 = encoder(img2)
-            log_p, actions_index, entropies = decoder(z1, z2)
-            transform_actions_index, magnitude_actions_index = actions_index
-            transform_entropy, magnitude_entropy = entropies
+            _, z = encoder(normalized_img)
+            log_p, actions_index, entropy = decoder(z)
 
         num_discrete_magnitude = decoder.num_discrete_magnitude
         transforms_list_1, transforms_list_2 = get_transforms_list(
-            transform_actions_index,
-            magnitude_actions_index,
+            actions_index,
             num_magnitudes=num_discrete_magnitude)
-        new_img1 = apply_transformations(img1, transforms_list_1)
-        new_img2 = apply_transformations(img2, transforms_list_2)
+        new_img1 = apply_transformations(img, transforms_list_1)
+        new_img2 = apply_transformations(img, transforms_list_2)
 
-        # new_img1 = torch.stack([random_grayscale(tensor) for tensor in new_img1])
-        # new_img2 = torch.stack([random_grayscale(tensor) for tensor in new_img2])
+        new_img1 = torch.stack([normalization(tensor) for tensor in new_img1])
+        new_img2 = torch.stack([normalization(tensor) for tensor in new_img2])
+        
         
         new_img1 = new_img1.to(device)
         new_img2 = new_img2.to(device)
@@ -119,41 +115,33 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         reward = similariy_reward_function(new_z1, new_z2)
         # reward = test_reward_function(y, magnitude_actions_index)
         
-        stored_z1[begin:end] = z1.detach().cpu()
-        stored_z2[begin:end] = z1.detach().cpu()
+        stored_z[begin:end] = z.detach().cpu()
         stored_log_p[begin:end] = log_p.detach().cpu()
-        stored_transform_actions_index[begin:end]  = transform_actions_index.detach().cpu()
-        stored_magnitude_actions_index[begin:end]  = magnitude_actions_index.detach().cpu()
+        stored_actions_index[begin:end]  = actions_index.detach().cpu()
         stored_rewards[begin:end] = reward
         
         mean_rewards += reward.mean().item()
-        mean_transform_entropy += transform_entropy.item()
-        mean_magnitude_entropy += magnitude_entropy.item()
 
     
-    string_transforms = []
-    for trans in transforms_list_1:
-        s = ' '.join([ f'{name}_{magnetude}' for (name, _, magnetude) in trans])
-        string_transforms.append( s )
+    # string_transforms = []
+    # for trans in transforms_list_1:
+    #     s = ' '.join([ f'{name}_{magnetude}' for (name, _, magnetude) in trans])
+    #     string_transforms.append( s )
     # print_sorted_strings_with_counts(string_transforms, topk=5)
     
     mean_rewards /= (len_trajectory // batch_size)
-    mean_transform_entropy /= (len_trajectory // batch_size)
-    mean_magnitude_entropy /= (len_trajectory // batch_size)
     
-    entropy = (mean_transform_entropy + mean_magnitude_entropy) / 2
-
     if logs:
         neptune_run["ppo/reward"].append(mean_rewards)
         neptune_run["ppo/transform_entropy"].append(mean_transform_entropy)
         neptune_run["ppo/magnitude_entropy"].append(mean_magnitude_entropy)
 
     return (
-            (stored_z1, stored_z2), 
+            (stored_z), 
             (stored_log_p),
-            (stored_transform_actions_index, stored_magnitude_actions_index),
+            (stored_actions_index),
             stored_rewards
-        ), (img1, img2, new_img1, new_img2), entropy
+        ), (img, img, new_img1, new_img2), entropy
 
 
 def collect_trajectories_no_input(len_trajectory, encoder, decoder, batch_size, logs, neptune_run):
@@ -303,21 +291,47 @@ def shuffle_trajectory(trajectory):
     return permuted_trajectory
 
 
+def shuffle_trajectory_2(trajectory):
+
+    (
+        (stored_z), 
+        (stored_log_p),
+        (actions_index),
+        stored_rewards
+    ) = trajectory
+
+    permutation = torch.randperm(stored_z.shape[0])
+
+    permuted_stored_z = stored_z[permutation]
+    permuted_stored_log_p = stored_log_p[permutation]
+    permuted_stored_actions_index  = actions_index[permutation]
+    permuted_stored_rewards = stored_rewards[permutation]
+
+    permuted_trajectory = (
+        (permuted_stored_z),
+        (permuted_stored_log_p),
+        (permuted_stored_actions_index),
+        permuted_stored_rewards
+    )
+
+    return permuted_trajectory
+
+
 def ppo_update_with_input(trajectory, decoder, optimizer, ppo_batch_size=256, ppo_epochs=4):
 
 
     for _ in range(ppo_epochs):
     
-        shuffled_trajectory = shuffle_trajectory(trajectory)
+        shuffled_trajectory = shuffle_trajectory_2(trajectory)
 
         (
-            (stored_z1, stored_z2), 
+            (stored_z), 
             (permuted_stored_log_p),
-            (stored_transform_actions_index, stored_magnitude_actions_index),
+            (stored_actions_index),
             stored_rewards
         ) = shuffled_trajectory
-
-        len_trajectory = stored_z1.shape[0]
+        
+        len_trajectory = stored_z.shape[0]
 
 
         assert len_trajectory % ppo_batch_size == 0
@@ -329,18 +343,14 @@ def ppo_update_with_input(trajectory, decoder, optimizer, ppo_batch_size=256, pp
 
             begin, end = i*ppo_batch_size, (i+1)*ppo_batch_size
 
-            z1 = stored_z1[begin:end].to(device).detach()
-            z2 = stored_z2[begin:end].to(device).detach()
+            z = stored_z[begin:end].to(device).detach()
             old_log_p = permuted_stored_log_p[begin:end].to(device).detach()
-            transform_actions_index = stored_transform_actions_index[begin:end].to(device).detach()
-            magnitude_actions_index = stored_magnitude_actions_index[begin:end].to(device).detach()
+            actions_index = stored_actions_index[begin:end].to(device).detach()
             reward = stored_rewards[begin:end].to(device).detach()
 
-            new_log_p, new_actions_index, entropies = decoder(z1, z2, old_action_index=(transform_actions_index, magnitude_actions_index))
-            new_transform_actions_index, new_magnitude_actions_index = new_actions_index
+            new_log_p, new_actions_index, entropy = decoder(z, old_action_index=actions_index)
             
-            assert (transform_actions_index == new_transform_actions_index).all()
-            assert (magnitude_actions_index == new_magnitude_actions_index).all()
+            assert (actions_index == new_actions_index).all()
             
             reward, new_log_p, old_log_p = reward.reshape(-1), new_log_p.reshape(-1), old_log_p.reshape(-1)
 
@@ -368,7 +378,6 @@ def ppo_update_with_input(trajectory, decoder, optimizer, ppo_batch_size=256, pp
             acc_loss_counter += 1
 
     return acc_loss / acc_loss_counter
-
 
 
 def ppo_update_no_input(trajectory, decoder, optimizer, ppo_batch_size=256, ppo_epochs=4):

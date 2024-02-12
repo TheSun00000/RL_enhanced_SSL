@@ -52,7 +52,7 @@ def build_resnet50():
 
 
 
-class DecoderRNN_(nn.Module):
+class DecoderLSTM(nn.Module):
     def __init__(
             self,
             embed_size, 
@@ -233,10 +233,7 @@ class DecoderRNN_(nn.Module):
             )
         
 
-
-
-
-class DecoderRNN(nn.Module):
+class DecoderNN_2inputs(nn.Module):
     def __init__(self,
             num_transforms,
             num_discrete_magnitude,
@@ -270,7 +267,7 @@ class DecoderRNN(nn.Module):
         
         
     def forward(self, x, old_action_index=None):
-        
+                
         batch_size = x.shape[0]
                 
         output = self.model(x)
@@ -289,7 +286,7 @@ class DecoderRNN(nn.Module):
             permutations_index = permutations_dist.sample()
         else:
             transform_actions_index, magnitude_actions_index = old_action_index
-            matches = torch.all(transform_actions_index.unsqueeze(0) == self.permutations.unsqueeze(1).unsqueeze(1), dim=-1) * 1
+            matches = torch.all(transform_actions_index[...,:4].unsqueeze(0) == self.permutations.unsqueeze(1).unsqueeze(1), dim=-1) * 1
             permutations_index = torch.argmax(matches, dim=0)
             magnitude_actions_index = magnitude_actions_index
                 
@@ -297,16 +294,28 @@ class DecoderRNN(nn.Module):
         permutation_log_p = F.log_softmax(permutations_logits, dim=-1).gather(-1, permutations_index.unsqueeze(-1)).reshape(batch_size, -1).sum(-1, keepdim=True)
         
         log_p = magnitude_log_p + permutation_log_p
+
         transform_actions_index = self.permutations[permutations_index]
+        grayscale_tensor = torch.full_like(transform_actions_index[..., :1], transform_actions_index.max()+1)
+        transform_actions_index = torch.concat((transform_actions_index, grayscale_tensor), dim=-1)
+        
         magnitude_actions_index = magnitude_actions_index
         transform_entropy = permutations_dist.entropy().mean()
         magnitude_entropy = magnitude_dist.entropy().mean()
+                
+        print(log_p.shape)
+        print(transform_actions_index.shape)
+        print(magnitude_actions_index.shape)
+        print(transform_entropy.shape)
+        print(magnitude_entropy.shape)
         
-        # print(log_p.shape)
-        # print(transform_actions_index.shape)
-        # print(magnitude_actions_index.shape)
-        # print(transform_entropy.shape)
-        # print(magnitude_entropy.shape)
+        
+        # torch.Size([64, 1])
+        # torch.Size([64, 2, 5])
+        # torch.Size([64, 2, 5])
+        # torch.Size([])
+        # torch.Size([])
+
         
         return (
                 log_p,
@@ -315,7 +324,136 @@ class DecoderRNN(nn.Module):
             )
 
 
-     
+class DecoderNN_1input(nn.Module):
+    def __init__(self,
+            num_transforms,
+            num_discrete_magnitude,
+            device
+            ):
+        super().__init__()
+    
+        self.num_transforms = num_transforms
+        self.num_discrete_magnitude = num_discrete_magnitude
+        self.seq_length = num_transforms
+        self.device = device
+        
+        self.permutations = torch.tensor(
+            list(permutations(range(4)))
+            ).to(device)
+        
+        self.num_transforms_permutations = len(self.permutations)
+        self.num_actions = num_transforms * num_discrete_magnitude
+        
+        self.output_dim_per_view = (
+            # Crop (Position[10], Area[10]):
+            num_discrete_magnitude + num_discrete_magnitude + \
+            # Color (4*magnitude[10], permutations):
+            4 * num_discrete_magnitude + self.num_transforms_permutations + \
+            # Gray (Porba[10]):
+            num_discrete_magnitude + \
+            # Gaussian blur (Sigma[10], Proba[10]):
+            num_discrete_magnitude + num_discrete_magnitude
+        )
+        
+        self.model = nn.Sequential(
+            nn.Linear(128, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 2 * self.output_dim_per_view)
+        )
+        
+        
+    def forward(self, x, old_action_index=None):
+        
+        *leading_dim, input_dim = x.shape                        
+        output = self.model(x)
+        
+        D = self.num_discrete_magnitude
+        crop_position_offset = 0
+        crop_area_offset = crop_position_offset + 2*D
+        color_magnitude_offset = crop_area_offset + 2*D
+        color_permutation_offset = color_magnitude_offset + 2*(4*D)
+        gray_proba_offset = color_permutation_offset + 2*self.num_transforms_permutations
+        blur_sigma_offset = gray_proba_offset + 2*D
+        blur_proba_offset = blur_sigma_offset + 2*D
+                
+        
+        crop_position_logits = output[:, :crop_area_offset]
+        crop_area_logits = output[:, crop_area_offset:color_magnitude_offset]
+        color_magnitude_logits = output[:, color_magnitude_offset:color_permutation_offset]
+        color_permutation_logits = output[:, color_permutation_offset:gray_proba_offset]
+        gray_proba_logits = output[:, gray_proba_offset:blur_sigma_offset]
+        blur_sigma_logits = output[:, blur_sigma_offset:blur_proba_offset]
+        blur_proba_logits = output[:, blur_proba_offset:]
+
+        
+        crop_position_logits = crop_position_logits.reshape(*leading_dim, 2, D)
+        crop_area_logits = crop_area_logits.reshape(*leading_dim, 2, D)
+        color_magnitude_logits = color_magnitude_logits.reshape(*leading_dim, 2, 4, D)
+        color_permutation_logits = color_permutation_logits.reshape(*leading_dim, 2, self.num_transforms_permutations)
+        gray_proba_logits = gray_proba_logits.reshape(*leading_dim, 2, D)
+        blur_sigma_logits = blur_sigma_logits.reshape(*leading_dim, 2, D)
+        blur_proba_logits = blur_proba_logits.reshape(*leading_dim, 2, D)
+        
+        
+        crop_position_dist = torch.distributions.Categorical(logits=crop_position_logits)
+        crop_area_dist = torch.distributions.Categorical(logits=crop_area_logits)
+        color_magnitude_dist = torch.distributions.Categorical(logits=color_magnitude_logits)
+        color_permutation_dist = torch.distributions.Categorical(logits=color_permutation_logits)
+        gray_proba_dist = torch.distributions.Categorical(logits=gray_proba_logits)
+        blur_sigma_dist = torch.distributions.Categorical(logits=blur_sigma_logits)
+        blur_proba_dist = torch.distributions.Categorical(logits=blur_proba_logits)
+                
+        
+        if old_action_index is None:
+            crop_position_index = crop_position_dist.sample()
+            crop_area_index = crop_area_dist.sample()
+            color_magnitude_index = color_magnitude_dist.sample()
+            color_permutation_index = color_permutation_dist.sample()
+            gray_proba_index = gray_proba_dist.sample()
+            blur_sigma_index = blur_sigma_dist.sample()
+            blur_proba_index = blur_proba_dist.sample()
+        else:
+            crop_position_index = old_action_index[..., 0]
+            crop_area_index = old_action_index[..., 1]
+            color_magnitude_index = old_action_index[..., 2:6]
+            color_permutation_index = old_action_index[..., 6]
+            gray_proba_index = old_action_index[..., 7]
+            blur_sigma_index = old_action_index[..., 8]
+            blur_proba_index = old_action_index[..., 9]
+        
+        
+        crop_position_log_p = F.log_softmax(crop_position_logits, dim=-1).gather(-1, crop_position_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
+        crop_area_log_p = F.log_softmax(crop_area_logits, dim=-1).gather(-1, crop_area_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
+        color_magnitude_log_p = F.log_softmax(color_magnitude_logits, dim=-1).gather(-1, color_magnitude_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
+        color_permutation_log_p = F.log_softmax(color_permutation_logits, dim=-1).gather(-1, color_permutation_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
+        gray_proba_log_p = F.log_softmax(gray_proba_logits, dim=-1).gather(-1, gray_proba_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
+        blur_sigma_log_p = F.log_softmax(blur_sigma_logits, dim=-1).gather(-1, blur_sigma_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
+        blur_proba_log_p = F.log_softmax(blur_proba_logits, dim=-1).gather(-1, blur_proba_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
+
+
+        log_p = (crop_position_log_p + crop_area_log_p) + (color_magnitude_log_p + color_permutation_log_p) + (gray_proba_log_p) + (blur_sigma_log_p + blur_proba_log_p)
+        
+        actions_index = torch.concat((
+            crop_position_index.unsqueeze(-1),
+            crop_area_index.unsqueeze(-1),
+            color_magnitude_index,
+            color_permutation_index.unsqueeze(-1),
+            gray_proba_index.unsqueeze(-1),
+            blur_sigma_index.unsqueeze(-1),
+            blur_proba_index.unsqueeze(-1),
+        ), dim=-1)
+                
+        entropy = (crop_position_dist.entropy().mean() + crop_area_dist.entropy().mean()) + (color_magnitude_dist.entropy().mean() + color_permutation_dist.entropy().mean()) + (gray_proba_dist.entropy().mean()) + (blur_sigma_dist.entropy().mean() + blur_proba_dist.entropy().mean())
+        
+        return (
+                log_p,
+                actions_index,
+                entropy
+            )
     
 
 class DecoderNoInput(nn.Module):
