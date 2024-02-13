@@ -28,6 +28,8 @@ def denormalize(tensor, mean, std):
 
 
 def plot_images_stacked(tensor1, tensor2):
+    tensor1 = tensor1.cpu()
+    tensor2 = tensor2.cpu()
     # Check if the input tensors have the correct shape
     expected_shape = (3, 32, 32)
     if tensor1.shape[1:] != expected_shape or tensor2.shape[1:] != expected_shape:
@@ -61,7 +63,29 @@ def plot_images_stacked(tensor1, tensor2):
 # Assuming you have a tensor named 'image_tensor'
 # plot_images(image_tensor)
 
+def rotate_images(images):
+    nimages = images.shape[0]
+    n_rot_images = 4 * nimages
 
+    # rotate images all 4 ways at once
+    rotated_images = torch.zeros([nimages, 4, images.shape[1], images.shape[2], images.shape[3]]).to(device)
+    rot_classes = torch.zeros([nimages, 4]).long().to(device)
+
+    rotated_images[:, 0] = images
+    # rotate 90
+    rotated_images[:, 1] = images.flip(3).transpose(2, 3)
+    rot_classes[:, 1] = 1
+    # rotate 180
+    rotated_images[:, 2] = images.flip(3).flip(2)
+    rot_classes[:, 2] = 2
+    # rotate 270
+    rotated_images[:, 3] = images.transpose(2, 3).flip(3)
+    rot_classes[:, 3] = 3
+
+    rotated_images = rotated_images.reshape(-1, images.shape[1], images.shape[2], images.shape[3])
+    rot_classes = rot_classes.reshape(-1)
+    
+    return rotated_images, rot_classes
 
 
 

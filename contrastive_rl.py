@@ -1,12 +1,13 @@
 import torch
+import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
 import numpy as np
 from tqdm import tqdm
 from neptune.types import File
 import random
 
-from utils.datasets import get_cifar10_dataloader
-from utils.networks import DecoderNN_1input, DecoderNoInput, build_resnet18, build_resnet50
+from utils.datasets import get_cifar10_dataloader, rotate_images, plot_images_stacked
+from utils.networks import SimCLR, DecoderNN_1input, DecoderNoInput, build_resnet18, build_resnet50
 from utils.contrastive import InfoNCELoss, top_k_accuracy, linear_evaluation, knn_evaluation
 from utils.ppo import (
     collect_trajectories_with_input,
@@ -192,7 +193,7 @@ def ppo_round(encoder, decoder, optimizer, config, neptune_run):
     return trajectory, (img1, img2, new_img1, new_img2), entropy, (losses, rewards)
 
 
-def contrastive_round(encoder, decoder, optimizer, scheduler, criterion, random_p, config, neptune_run):
+def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion, random_p, config, neptune_run):
     
     num_steps = config['simclr_iterations'] 
     batch_size = config['simclr_bs']
@@ -215,28 +216,37 @@ def contrastive_round(encoder, decoder, optimizer, scheduler, criterion, random_
     
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader))
     for i, ((x1, x2), y) in tqdm_train_loader:
-
+        
+        
+        # plot_images_stacked(rotated_x, rotated_x)
+        
         x1 = x1.to(device)
         x2 = x2.to(device)
         
         _, z1 = encoder(x1)
         _, z2 = encoder(x2)
 
-        # print(x1.min(), z1.min())
-
         sim, _, loss = criterion(z1, z2, temperature=0.5)
 
+        if config['lmbd'] > 0:
+            rotated_x, rotated_labels = rotate_images(x1)
+            rotated_x = rotated_x.to(device)
+            feature = encoder.enc(rotated_x)
+            logits = encoder.predictor(feature)
+            rot_loss = F.cross_entropy(logits, rotated_labels)
+            loss += config['lmbd'] * rot_loss
+        
+        
         optimizer.zero_grad()
         loss.backward()
 
         optimizer.step()
-        # scheduler.step()
 
         if logs:
             neptune_run["simclr/loss"].append(loss.item())
+            neptune_run["simclr/rot_loss"].append(rot_loss.item())
             neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
             neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
-            # neptune_run["simclr/sim"].append(File.as_image(sim.cpu().detach().numpy()/2 + 0.5 ))
         
         
         
@@ -250,21 +260,6 @@ def contrastive_round(encoder, decoder, optimizer, scheduler, criterion, random_
 
         del x1, x2, loss, _
         torch.cuda.empty_cache()
-
-#         if i % PLOT_EACH == 0:
-#             clear_output(True)
-
-#             sim, _, _ = criterion(z1, z2, batch_size=z1.shape[0], temperature=0.07)
-
-#             fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-#             ax1.imshow(sim.cpu().detach(), vmin=-1, vmax=1, cmap='hot')
-#             ax2.plot(smooth_curve(losses))
-#             ax3.plot(smooth_curve(top_1_score))
-#             ax3.plot(smooth_curve(top_5_score))
-#             ax3.plot(smooth_curve(top_10_score))
-
-#             plt.show()
-#         break
         
     return (sim.cpu().detach(), losses, top_1_score, top_5_score, top_10_score)
 
@@ -297,10 +292,11 @@ config = {
     'iterations':1000,
 
     'simclr_iterations':'all',
-    'simclr_bs':256,
+    'simclr_bs':3,
     'linear_eval_epochs':200,
     'init_random_p':0.5,
     'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
+    'lmbd': 0.4,
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
     'ppo_iterations':200,
@@ -309,7 +305,7 @@ config = {
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
     
-    'logs':True,
+    'logs':False,
     'model_save_path':model_save_path,
     'seed':seed,
 }
@@ -337,34 +333,33 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     random_p = 1.
     print('random_p:', step, random_p)
     
-    (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
-        encoder,
-        decoder,
-        config=config,
-        optimizer=simclr_optimizer, 
-        scheduler=simclr_scheduler, 
-        criterion=simclr_criterion, 
-        random_p=random_p,
-        neptune_run=neptune_run
-    )
+    # (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
+    #     encoder,
+    #     decoder,
+    #     config=config,
+    #     optimizer=simclr_optimizer, 
+    #     scheduler=simclr_scheduler, 
+    #     criterion=simclr_criterion, 
+    #     random_p=random_p,
+    #     neptune_run=neptune_run
+    # )
     
-    if step % 1 == 0:
-        # train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
-        test_acc = knn_evaluation(encoder)
-    
-    if logs:
-        # neptune_run["linear_eval/train_acc"].append(train_acc)
-        neptune_run["linear_eval/test_acc"] .append(test_acc)
-
     # if step % 1 == 0:
-    #     decoder, ppo_optimizer = ppo_init(config)
-    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-    #         encoder, 
-    #         decoder,
-    #         ppo_optimizer,
-    #         config=config,
-    #         neptune_run=neptune_run
-    #     )
+    #     # train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
+    #     test_acc = knn_evaluation(encoder)
+    
+    # if logs:
+    #     neptune_run["linear_eval/test_acc"] .append(test_acc)
+
+    if step % 1 == 0:
+        decoder, ppo_optimizer = ppo_init(config)
+        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+            encoder, 
+            decoder,
+            ppo_optimizer,
+            config=config,
+            neptune_run=neptune_run
+        )
     
     
     

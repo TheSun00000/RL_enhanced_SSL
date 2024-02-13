@@ -33,9 +33,29 @@ class SimCLR(nn.Module):
 
         # Add MLP projection.
         self.projection_dim = projection_dim
-        self.projector = nn.Sequential(nn.Linear(self.feature_dim, 2048),
-                                       nn.ReLU(),
-                                       nn.Linear(2048, projection_dim))
+        # self.projector = nn.Sequential(
+        #     nn.Linear(self.feature_dim, 2048),
+        #     nn.ReLU(),
+        #     nn.Linear(2048, projection_dim)
+        # )
+        
+        self.projector = nn.Sequential(
+            nn.Linear(self.feature_dim, 2048, bias=False),
+            nn.BatchNorm1d(2048),
+            nn.ReLU(inplace=True),
+            nn.Linear(2048, projection_dim, bias=False),
+            nn.BatchNorm1d(projection_dim, affine=False)
+        )
+        
+        self.predictor = nn.Sequential(
+            nn.Linear(self.feature_dim, 2048),
+            nn.LayerNorm(2048),
+            nn.ReLU(inplace=True),  # first layer
+            nn.Linear(2048, 2048),
+            nn.LayerNorm(2048),
+            nn.ReLU(inplace=True),
+            nn.Linear(2048, 4)
+        )
 
     def forward(self, x):
         feature = self.enc(x)

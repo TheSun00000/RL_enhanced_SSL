@@ -5,7 +5,7 @@ from collections import Counter
 
 
 
-from utils.datasets import get_cifar10_dataloader
+from utils.datasets import get_cifar10_dataloader, rotate_images
 from utils.transforms import (
     get_transforms_list,
     apply_transformations
@@ -64,7 +64,7 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     
     normalization = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
 
-    encoder_dim = encoder.projector[2].out_features
+    encoder_dim = encoder.projector[3].out_features
 
 
     stored_z = torch.zeros((len_trajectory, encoder_dim))
@@ -106,12 +106,22 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         with torch.no_grad():
             _, new_z1 = encoder(new_img1)
             _, new_z2 = encoder(new_img2)
+            
+            rotated_x, rotated_labels = rotate_images(new_img1)
+            rotated_x = rotated_x.to(device)
+            feature = encoder.enc(rotated_x)
+            logits = encoder.predictor(feature)
+            rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
+            rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
+                        
+            
         new_img1 = new_img1.to('cpu')
         new_img2 = new_img2.to('cpu')
 
 
-        reward = similariy_reward_function(new_z1, new_z2)
+        reward = similariy_reward_function(new_z1, new_z2) - 0.4*rot_loss
         # reward = test_reward_function(y, magnitude_actions_index)
+        print('reward:', reward.shape)
         
         stored_z[begin:end] = z.detach().cpu()
         stored_log_p[begin:end] = log_p.detach().cpu()
