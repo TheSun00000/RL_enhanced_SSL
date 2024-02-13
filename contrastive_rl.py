@@ -296,17 +296,17 @@ def get_random_p(epoch, init_random_p):
 config = {
     'iterations':1000,
 
-    'simclr_iterations':'all',
-    'simclr_bs':256,
+    'simclr_iterations':10,
+    'simclr_bs':64,
     'linear_eval_epochs':200,
     'init_random_p':0.5,
     'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
     'ppo_iterations':200,
-    'ppo_len_trajectory':512*2,
-    'ppo_collection_bs':512,
-    'ppo_update_bs':128,
+    'ppo_len_trajectory':16,
+    'ppo_collection_bs':16,
+    'ppo_update_bs':16,
     'ppo_update_epochs':4,
     
     'logs':True,
