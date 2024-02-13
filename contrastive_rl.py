@@ -19,8 +19,8 @@ from utils.transforms import get_transforms_list
 from utils.logs import init_neptune, get_model_save_path
 
 
-# seed = random.randint(0, 100000)
-seed = 42
+seed = random.randint(0, 100000)
+# seed = 42
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)  # if you are using multiple GPUs
@@ -85,7 +85,7 @@ def contrastive_init(config):
         encoder = build_resnet50()
     
     
-    # encoder.load_state_dict(torch.load('params/params_174/encoder.pt'))
+    encoder.load_state_dict(torch.load('params/params_222/encoder.pt'))
     encoder = encoder.to(device)
 
     criterion = InfoNCELoss()
@@ -235,6 +235,7 @@ def contrastive_round(encoder, decoder, optimizer, scheduler, criterion, random_
         if logs:
             neptune_run["simclr/loss"].append(loss.item())
             neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
+            neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
             # neptune_run["simclr/sim"].append(File.as_image(sim.cpu().detach().numpy()/2 + 0.5 ))
         
         
@@ -295,20 +296,20 @@ def get_random_p(epoch, init_random_p):
 config = {
     'iterations':1000,
 
-    'simclr_iterations':5,
-    'simclr_bs':64,
+    'simclr_iterations':'all',
+    'simclr_bs':256,
     'linear_eval_epochs':200,
     'init_random_p':0.5,
     'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
-    'ppo_iterations':5,
-    'ppo_len_trajectory':16,
-    'ppo_collection_bs':16,
-    'ppo_update_bs':16,
+    'ppo_iterations':200,
+    'ppo_len_trajectory':512*2,
+    'ppo_collection_bs':512,
+    'ppo_update_bs':128,
     'ppo_update_epochs':4,
     
-    'logs':False,
+    'logs':True,
     'model_save_path':model_save_path,
     'seed':seed,
 }
@@ -336,16 +337,16 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     random_p = 1.
     print('random_p:', step, random_p)
     
-    (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
-        encoder,
-        decoder,
-        config=config,
-        optimizer=simclr_optimizer, 
-        scheduler=simclr_scheduler, 
-        criterion=simclr_criterion, 
-        random_p=random_p,
-        neptune_run=neptune_run
-    )
+    # (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
+    #     encoder,
+    #     decoder,
+    #     config=config,
+    #     optimizer=simclr_optimizer, 
+    #     scheduler=simclr_scheduler, 
+    #     criterion=simclr_criterion, 
+    #     random_p=random_p,
+    #     neptune_run=neptune_run
+    # )
     
     # if step % 1 == 0:
     #     train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])

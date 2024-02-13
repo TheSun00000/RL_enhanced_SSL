@@ -368,13 +368,10 @@ class DecoderNN_1input(nn.Module):
         
     def forward(self, x, old_action_index=None):
         
-        *leading_dim, input_dim = x.shape                        
-        output = self.model(x)
+        *leading_dim, input_dim = x.shape
         
-        # print('-'*100)
-        # print(x.min(), x.max())
-        # print(output.min(), output.max())
-        # print('-'*100)
+        x = F.normalize(x, dim=-1)                     
+        output = self.model(x)
         
         D = self.num_discrete_magnitude
         crop_position_offset = 0
@@ -449,7 +446,7 @@ class DecoderNN_1input(nn.Module):
 
 
         log_p = (crop_position_log_p + crop_area_log_p) + (color_magnitude_log_p + color_permutation_log_p) + (gray_proba_log_p) + (blur_sigma_log_p + blur_proba_log_p)
-        log_p = (color_magnitude_log_p + color_permutation_log_p)
+        # log_p = (color_magnitude_log_p + color_permutation_log_p)
         
         actions_index = torch.concat((
             crop_position_index.unsqueeze(-1),

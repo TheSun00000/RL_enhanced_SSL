@@ -117,11 +117,11 @@ TRANSFORMS_DICT = {
     },
     'gray': {
         'function':grayscale_image,
-        'proba':(0, 0)
+        'proba':(0, 0.5)
     },
     'blur': {
         'function':blur_image,
-        'proba':(0, 0),
+        'proba':(0, 0.5),
         'sigma':(0.1, 2)
     },
     'flip': {

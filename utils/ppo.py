@@ -74,9 +74,7 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
 
     
     mean_rewards = 0
-    mean_transform_entropy = 0
-    mean_magnitude_entropy = 0
-    
+    mean_entropy = 0    
     
     data_loader_iterator = iter(data_loader)
     for i in range(len_trajectory // batch_size):
@@ -121,6 +119,7 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         stored_rewards[begin:end] = reward
         
         mean_rewards += reward.mean().item()
+        mean_entropy += entropy.item()
 
     
     # string_transforms = []
@@ -130,11 +129,11 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     # print_sorted_strings_with_counts(string_transforms, topk=5)
     
     mean_rewards /= (len_trajectory // batch_size)
+    mean_entropy /= (len_trajectory // batch_size)
     
     if logs:
         neptune_run["ppo/reward"].append(mean_rewards)
-        neptune_run["ppo/transform_entropy"].append(mean_transform_entropy)
-        neptune_run["ppo/magnitude_entropy"].append(mean_magnitude_entropy)
+        neptune_run["ppo/mean_entropy"].append(mean_entropy)
 
     return (
             (stored_z), 
@@ -361,16 +360,19 @@ def ppo_update_with_input(trajectory, decoder, optimizer, ppo_batch_size=256, pp
             ratio = torch.exp(new_log_p - old_log_p.detach())
 
             surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1-0.2, 1+0.2) * advantage
+            surr2 = torch.clamp(ratio, 1-0.2, 1+0.2) * advantage            
             actor_loss = - torch.min(surr1, surr2).mean()
 
             loss = actor_loss
             
-            print('reward:', reward[:5].detach().cpu().numpy().tolist())
+            # print(entropy)
+            # print('reward:', reward[:5].detach().cpu().numpy().tolist())
             # print('advantage:', advantage[:5].detach().cpu().numpy().tolist())
             # print('new_log_p:', new_log_p[:5].detach().cpu().numpy().tolist())
             # print('old_log_p:', old_log_p[:5].detach().cpu().numpy().tolist())
-            print('ratio:', ratio[:5].detach().cpu().numpy().tolist())
+            # print('ratio:', ratio[:5].detach().cpu().numpy().tolist())
+            # print('surr1:', surr1[:5].detach().cpu().numpy().tolist())
+            # print('torch.min(surr1, surr2):', surr2[:5].detach().cpu().numpy().tolist())
 
             # print('old_log_p', old_log_p.shape)
             # print('advantage', advantage.shape)
