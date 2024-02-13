@@ -7,7 +7,7 @@ import random
 
 from utils.datasets import get_cifar10_dataloader
 from utils.networks import DecoderNN_1input, DecoderNoInput, build_resnet18, build_resnet50
-from utils.contrastive import InfoNCELoss, top_k_accuracy, linear_evaluation
+from utils.contrastive import InfoNCELoss, top_k_accuracy, linear_evaluation, knn_evaluation
 from utils.ppo import (
     collect_trajectories_with_input,
     collect_trajectories_no_input,  
@@ -85,7 +85,7 @@ def contrastive_init(config):
         encoder = build_resnet50()
     
     
-    encoder.load_state_dict(torch.load('params/params_222/encoder.pt'))
+    # encoder.load_state_dict(torch.load('params/params_222/encoder.pt'))
     encoder = encoder.to(device)
 
     criterion = InfoNCELoss()
@@ -296,8 +296,8 @@ def get_random_p(epoch, init_random_p):
 config = {
     'iterations':1000,
 
-    'simclr_iterations':10,
-    'simclr_bs':64,
+    'simclr_iterations':'all',
+    'simclr_bs':256,
     'linear_eval_epochs':200,
     'init_random_p':0.5,
     'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
@@ -337,33 +337,34 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     random_p = 1.
     print('random_p:', step, random_p)
     
-    # (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
-    #     encoder,
-    #     decoder,
-    #     config=config,
-    #     optimizer=simclr_optimizer, 
-    #     scheduler=simclr_scheduler, 
-    #     criterion=simclr_criterion, 
-    #     random_p=random_p,
-    #     neptune_run=neptune_run
-    # )
+    (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
+        encoder,
+        decoder,
+        config=config,
+        optimizer=simclr_optimizer, 
+        scheduler=simclr_scheduler, 
+        criterion=simclr_criterion, 
+        random_p=random_p,
+        neptune_run=neptune_run
+    )
     
-    # if step % 1 == 0:
-    #     train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
-    
-    # if logs:
-    #     neptune_run["linear_eval/train_acc"].append(train_acc)
-    #     neptune_run["linear_eval/test_acc"] .append(test_acc)
-
     if step % 1 == 0:
-        decoder, ppo_optimizer = ppo_init(config)
-        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-            encoder, 
-            decoder,
-            ppo_optimizer,
-            config=config,
-            neptune_run=neptune_run
-        )
+        # train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
+        test_acc = knn_evaluation(encoder)
+    
+    if logs:
+        # neptune_run["linear_eval/train_acc"].append(train_acc)
+        neptune_run["linear_eval/test_acc"] .append(test_acc)
+
+    # if step % 1 == 0:
+    #     decoder, ppo_optimizer = ppo_init(config)
+    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+    #         encoder, 
+    #         decoder,
+    #         ppo_optimizer,
+    #         config=config,
+    #         neptune_run=neptune_run
+    #     )
     
     
     

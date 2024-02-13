@@ -246,7 +246,7 @@ def knn_monitor(net, memory_data_loader, test_data_loader, device='cuda', k=200,
     total_top1, total_top5, total_num, feature_bank = 0.0, 0.0, 0, []
     with torch.no_grad():
         # generate feature bank
-        for data, target in tqdm(memory_data_loader):
+        for data, target in memory_data_loader:
             _, feature = net(data.to(device=device, non_blocking=True))
             feature = F.normalize(feature, dim=1)
             feature_bank.append(feature)
@@ -255,7 +255,7 @@ def knn_monitor(net, memory_data_loader, test_data_loader, device='cuda', k=200,
         # [N]
         feature_labels = torch.tensor(targets, device=feature_bank.device)
         # loop test data to predict the label by weighted knn search
-        for data, target in tqdm(test_data_loader):
+        for data, target in test_data_loader:
             data, target = data.to(device=device, non_blocking=True), target.to(device=device, non_blocking=True)
             _, feature = net(data)
             feature = F.normalize(feature, dim=1)
@@ -304,7 +304,7 @@ def knn_evaluation(encoder):
     linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True,  download=True, transform=simple_transform)
     linear_eval_test_dataset  = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=simple_transform)
 
-    train_loader = DataLoader(linear_eval_train_dataset, batch_size=1024, shuffle=True)
+    train_loader = DataLoader(linear_eval_train_dataset, batch_size=1024, shuffle=False)
     test_loader = DataLoader(linear_eval_test_dataset, batch_size=1024, shuffle=False)
     
     acc = knn_monitor(
