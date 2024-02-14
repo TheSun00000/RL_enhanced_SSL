@@ -21,7 +21,7 @@ from utils.logs import init_neptune, get_model_save_path
 
 
 seed = random.randint(0, 100000)
-# seed = 42
+seed = 1
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)  # if you are using multiple GPUs
@@ -226,8 +226,10 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
         _, z1 = encoder(x1)
         _, z2 = encoder(x2)
 
-        sim, _, loss = criterion(z1, z2, temperature=0.5)
+        sim, _, simclr_loss = criterion(z1, z2, temperature=0.5)
 
+        simclr_loss_item = simclr_loss.item()
+        loss = simclr_loss
         if config['lmbd'] > 0:
             rotated_x, rotated_labels = rotate_images(x1)
             rotated_x = rotated_x.to(device)
@@ -235,7 +237,7 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
             logits = encoder.predictor(feature)
             rot_loss = F.cross_entropy(logits, rotated_labels)
             loss += config['lmbd'] * rot_loss
-        
+                
         
         optimizer.zero_grad()
         loss.backward()
@@ -243,8 +245,10 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
         optimizer.step()
 
         if logs:
-            neptune_run["simclr/loss"].append(loss.item())
-            neptune_run["simclr/rot_loss"].append(rot_loss.item())
+            neptune_run["simclr/loss"].append(simclr_loss_item)
+            if config['lmbd'] > 0:
+                neptune_run["simclr/all_loss"].append(loss.item())
+                neptune_run["simclr/rot_loss"].append(rot_loss.item())
             neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
             neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
         
@@ -292,7 +296,7 @@ config = {
     'iterations':1000,
 
     'simclr_iterations':'all',
-    'simclr_bs':3,
+    'simclr_bs':256,
     'linear_eval_epochs':200,
     'init_random_p':0.5,
     'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
@@ -300,12 +304,12 @@ config = {
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
     'ppo_iterations':200,
-    'ppo_len_trajectory':16,
-    'ppo_collection_bs':16,
-    'ppo_update_bs':16,
+    'ppo_len_trajectory':512*2,
+    'ppo_collection_bs':512,
+    'ppo_update_bs':128,
     'ppo_update_epochs':4,
     
-    'logs':False,
+    'logs':True,
     'model_save_path':model_save_path,
     'seed':seed,
 }
@@ -330,36 +334,35 @@ stop_ppo = False
 for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
     
     # random_p = get_random_p(step, config['init_random_p'])
-    random_p = 1.
+    random_p = 1
     print('random_p:', step, random_p)
     
-    # (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
-    #     encoder,
-    #     decoder,
-    #     config=config,
-    #     optimizer=simclr_optimizer, 
-    #     scheduler=simclr_scheduler, 
-    #     criterion=simclr_criterion, 
-    #     random_p=random_p,
-    #     neptune_run=neptune_run
-    # )
+    (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
+        encoder,
+        decoder,
+        config=config,
+        optimizer=simclr_optimizer, 
+        scheduler=simclr_scheduler, 
+        criterion=simclr_criterion, 
+        random_p=random_p,
+        neptune_run=neptune_run
+    )
     
-    # if step % 1 == 0:
-    #     # train_acc, test_acc = linear_evaluation(encoder, num_epochs=config['linear_eval_epochs'])
-    #     test_acc = knn_evaluation(encoder)
-    
-    # if logs:
-    #     neptune_run["linear_eval/test_acc"] .append(test_acc)
-
     if step % 1 == 0:
-        decoder, ppo_optimizer = ppo_init(config)
-        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-            encoder, 
-            decoder,
-            ppo_optimizer,
-            config=config,
-            neptune_run=neptune_run
-        )
+        test_acc = knn_evaluation(encoder)
+    
+    if logs:
+        neptune_run["linear_eval/test_acc"] .append(test_acc)
+
+    # if step % 5 == 0:
+    #     decoder, ppo_optimizer = ppo_init(config)
+    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+    #         encoder, 
+    #         decoder,
+    #         ppo_optimizer,
+    #         config=config,
+    #         neptune_run=neptune_run
+    #     )
     
     
     

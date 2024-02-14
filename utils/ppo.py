@@ -121,7 +121,6 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
 
         reward = similariy_reward_function(new_z1, new_z2) - 0.4*rot_loss
         # reward = test_reward_function(y, magnitude_actions_index)
-        print('reward:', reward.shape)
         
         stored_z[begin:end] = z.detach().cpu()
         stored_log_p[begin:end] = log_p.detach().cpu()

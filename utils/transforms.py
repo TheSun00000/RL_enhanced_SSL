@@ -113,7 +113,7 @@ TRANSFORMS_DICT = {
     'crop': {
         'function':crop_image,
         'position':None,
-        'area':(1, 1)
+        'area':(0.2, 1)
     },
     'gray': {
         'function':grayscale_image,
