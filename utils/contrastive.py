@@ -130,110 +130,98 @@ class LinearClassifier(nn.Module):
 #     transforms.RandomHorizontalFlip(p=0.5),
 #     transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
 #     transforms.RandomGrayscale(p=0.2),
+#     transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2))], p=0.5),
 #     transforms.ToTensor(),
-# ])
+#     transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
 
 # linear_eval_test_transform = transforms.Compose([
 #     transforms.ToTensor(),
-# ])
+#     transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
 
-linear_eval_train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(32),
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-    transforms.RandomGrayscale(p=0.2),
-    transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2))], p=0.5),
-    transforms.ToTensor(),
-    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
-
-linear_eval_test_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
-
-linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True, download=True, transform=linear_eval_train_transform)
-linear_eval_test_dataset = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=linear_eval_test_transform)
+# linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True, download=True, transform=linear_eval_train_transform)
+# linear_eval_test_dataset = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=linear_eval_test_transform)
 
 
-def linear_evaluation(encoder, num_epochs=10):
+# def linear_evaluation(encoder, num_epochs=10):
 
-    train_loader = DataLoader(linear_eval_train_dataset, batch_size=1024, shuffle=True)
-    test_loader = DataLoader(linear_eval_test_dataset, batch_size=1024, shuffle=False)
+#     train_loader = DataLoader(linear_eval_train_dataset, batch_size=1024, shuffle=True)
+#     test_loader = DataLoader(linear_eval_test_dataset, batch_size=1024, shuffle=False)
 
 
-    def extract_features(data_loader, encoder, epochs):
-        features, labels = [], []
-        # for images, labels_batch in tqdm(data_loader, desc='[Linear Eval][Features extraction]'):
-        for epoch in tqdm(range(epochs)):
-            for images, labels_batch in data_loader:
-                with torch.no_grad():
-                    features_batch, projections_batch = encoder(images.to(device))
-                features.append(features_batch)
-                labels.append(labels_batch)
-        return torch.cat(features, dim=0), torch.cat(labels, dim=0)
+#     def extract_features(data_loader, encoder, epochs):
+#         features, labels = [], []
+#         # for images, labels_batch in tqdm(data_loader, desc='[Linear Eval][Features extraction]'):
+#         for epoch in tqdm(range(epochs)):
+#             for images, labels_batch in data_loader:
+#                 with torch.no_grad():
+#                     features_batch, projections_batch = encoder(images.to(device))
+#                 features.append(features_batch)
+#                 labels.append(labels_batch)
+#         return torch.cat(features, dim=0), torch.cat(labels, dim=0)
 
-    # Extract features for linear evaluation
-    train_features, train_labels = extract_features(train_loader, encoder, epochs=1)
-    test_features, test_labels = extract_features(test_loader, encoder, epochs=1)
+#     # Extract features for linear evaluation
+#     train_features, train_labels = extract_features(train_loader, encoder, epochs=1)
+#     test_features, test_labels = extract_features(test_loader, encoder, epochs=1)
 
     
-    features_train_dataset = FeaturesDataset(train_features, train_labels)
-    features_test_dataset = FeaturesDataset(test_features, test_labels)
+#     features_train_dataset = FeaturesDataset(train_features, train_labels)
+#     features_test_dataset = FeaturesDataset(test_features, test_labels)
 
-    features_train_dataloader = DataLoader(features_train_dataset, batch_size=1024, shuffle=True)
-    features_test_dataloader = DataLoader(features_test_dataset, batch_size=1024, shuffle=True)
+#     features_train_dataloader = DataLoader(features_train_dataset, batch_size=1024, shuffle=True)
+#     features_test_dataloader = DataLoader(features_test_dataset, batch_size=1024, shuffle=True)
     
     
     
-    linear_eval_model = LinearClassifier(encoder.feature_dim, num_classes=10).to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(linear_eval_model.parameters(), lr=0.01, momentum=0.9)
+#     linear_eval_model = LinearClassifier(encoder.feature_dim, num_classes=10).to(device)
+#     criterion = nn.CrossEntropyLoss()
+#     optimizer = torch.optim.SGD(linear_eval_model.parameters(), lr=0.01, momentum=0.9)
     
-    print("[Linear Eval][Training]")
-    # for epoch in tqdm(range(num_epochs), desc="[Linear Eval][Training]"):
-    for epoch in range(num_epochs):
-        linear_eval_model.train()
+#     print("[Linear Eval][Training]")
+#     # for epoch in tqdm(range(num_epochs), desc="[Linear Eval][Training]"):
+#     for epoch in range(num_epochs):
+#         linear_eval_model.train()
 
-        for features, labels in features_train_dataloader:
-            features, labels = features.to(device), labels.to(device)
-            outputs = linear_eval_model(features)
-            loss = criterion(outputs, labels)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+#         for features, labels in features_train_dataloader:
+#             features, labels = features.to(device), labels.to(device)
+#             outputs = linear_eval_model(features)
+#             loss = criterion(outputs, labels)
+#             optimizer.zero_grad()
+#             loss.backward()
+#             optimizer.step()
             
             
             
-    linear_eval_model.eval()
+#     linear_eval_model.eval()
     
-    with torch.no_grad():
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            print("[Linear Eval][Train Eval]")
-            # for features, labels in tqdm(features_train_dataloader, desc="[Linear Eval][Train Eval]"):
-            for features, labels in features_train_dataloader:
-                features, labels = features.to(device), labels.to(device)
-                outputs = linear_eval_model(features)
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
-        train_accuracy = (correct / total) * 100
+#     with torch.no_grad():
+#         correct = 0
+#         total = 0
+#         with torch.no_grad():
+#             print("[Linear Eval][Train Eval]")
+#             # for features, labels in tqdm(features_train_dataloader, desc="[Linear Eval][Train Eval]"):
+#             for features, labels in features_train_dataloader:
+#                 features, labels = features.to(device), labels.to(device)
+#                 outputs = linear_eval_model(features)
+#                 _, predicted = torch.max(outputs.data, 1)
+#                 total += labels.size(0)
+#                 correct += (predicted == labels).sum().item()
+#         train_accuracy = (correct / total) * 100
         
         
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            print("[Linear Eval][Test Eval]")
-            # for features, labels in tqdm(features_test_dataloader, desc="[Linear Eval][Test Eval]"):
-            for features, labels in features_test_dataloader:
-                features, labels = features.to(device), labels.to(device)
-                outputs = linear_eval_model(features)
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
-        test_accuracy = (correct / total) * 100
+#         correct = 0
+#         total = 0
+#         with torch.no_grad():
+#             print("[Linear Eval][Test Eval]")
+#             # for features, labels in tqdm(features_test_dataloader, desc="[Linear Eval][Test Eval]"):
+#             for features, labels in features_test_dataloader:
+#                 features, labels = features.to(device), labels.to(device)
+#                 outputs = linear_eval_model(features)
+#                 _, predicted = torch.max(outputs.data, 1)
+#                 total += labels.size(0)
+#                 correct += (predicted == labels).sum().item()
+#         test_accuracy = (correct / total) * 100
     
-    return train_accuracy, test_accuracy
+#     return train_accuracy, test_accuracy
             
             
             

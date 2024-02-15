@@ -5,10 +5,11 @@ import numpy as np
 from tqdm import tqdm
 from neptune.types import File
 import random
+import math
 
 from utils.datasets import get_cifar10_dataloader, rotate_images, plot_images_stacked
 from utils.networks import SimCLR, DecoderNN_1input, DecoderNoInput, build_resnet18, build_resnet50
-from utils.contrastive import InfoNCELoss, top_k_accuracy, linear_evaluation, knn_evaluation
+from utils.contrastive import InfoNCELoss, top_k_accuracy, knn_evaluation
 from utils.ppo import (
     collect_trajectories_with_input,
     collect_trajectories_no_input,  
@@ -98,10 +99,17 @@ def contrastive_init(config):
     #     weight_decay=1e-6,
     #     nesterov=True)
     
-    optimizer = torch.optim.Adam(
+    # optimizer = torch.optim.Adam(
+    #     encoder.parameters(),
+    #     lr=0.001,
+    #     weight_decay=1e-6,
+    # )
+    
+    optimizer = torch.optim.SGD(
         encoder.parameters(),
-        lr=0.001,
-        weight_decay=1e-6,
+        momentum=0.9,
+        lr=config['lr'] * config['simclr_bs'] / 256,
+        weight_decay=0.0005
     )
 
 
@@ -119,6 +127,22 @@ def contrastive_init(config):
     )
     
     return encoder, optimizer, scheduler, criterion
+
+
+def adjust_learning_rate(epochs, warmup_epochs, base_lr, optimizer, loader, step):
+    max_steps = epochs * len(loader)
+    warmup_steps = warmup_epochs * len(loader)
+    if step < warmup_steps:
+        lr = base_lr * step / warmup_steps
+    else:
+        step -= warmup_steps
+        max_steps -= warmup_steps
+        q = 0.5 * (1 + math.cos(math.pi * step / max_steps))
+        end_lr = 0
+        lr = base_lr * q + end_lr * (1 - q)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr
 
 
 def init(config):
@@ -193,7 +217,7 @@ def ppo_round(encoder, decoder, optimizer, config, neptune_run):
     return trajectory, (img1, img2, new_img1, new_img2), entropy, (losses, rewards)
 
 
-def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion, random_p, config, neptune_run):
+def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion, random_p, config, epoch, neptune_run):
     
     num_steps = config['simclr_iterations'] 
     batch_size = config['simclr_bs']
@@ -215,9 +239,16 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
 
     
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader))
-    for i, ((x1, x2), y) in tqdm_train_loader:
+    for it, ((x1, x2), y) in tqdm_train_loader:
         
-        
+        lr = adjust_learning_rate(epochs=config['epochs'],
+            warmup_epochs=config['warmup_epochs'],
+            base_lr=config['lr'] * config['simclr_bs'] / 256,
+            optimizer=optimizer,
+            loader=train_loader,
+            step=it+(epoch-1)*len(train_loader)
+        )
+                
         # plot_images_stacked(rotated_x, rotated_x)
         
         x1 = x1.to(device)
@@ -264,12 +295,14 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
 
         del x1, x2, loss, _
         torch.cuda.empty_cache()
-        
+    
+    print('step:{}   lr:{}'.format(it+(epoch-1)*len(train_loader), lr))
+    
     return (sim.cpu().detach(), losses, top_1_score, top_5_score, top_10_score)
 
 
 # config = {
-#     'iterations':100,
+#     'epochs':100,
     
 #     'simclr_iterations':50,
 #     'simclr_bs':1024,
@@ -293,14 +326,16 @@ def get_random_p(epoch, init_random_p):
 
 
 config = {
-    'iterations':1000,
+    'epochs':1000,
+    'warmup_epochs':10,
 
     'simclr_iterations':'all',
-    'simclr_bs':256,
+    'simclr_bs':512,
     'linear_eval_epochs':200,
     'init_random_p':0.5,
     'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
     'lmbd': 0.4,
+    'lr':0.03,
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
     'ppo_iterations':200,
@@ -331,15 +366,16 @@ if logs:
 
 stop_ppo = False
 
-for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
+for epoch in tqdm(range(1, config['epochs']+1), desc='[Main Loop]'):
     
-    # random_p = get_random_p(step, config['init_random_p'])
+    # random_p = get_random_p(epoch, config['init_random_p'])
     random_p = 1
-    print('random_p:', step, random_p)
+    print('random_p:', epoch, random_p)
     
     (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
         encoder,
         decoder,
+        epoch=epoch,
         config=config,
         optimizer=simclr_optimizer, 
         scheduler=simclr_scheduler, 
@@ -348,13 +384,13 @@ for step in tqdm(range(config['iterations']), desc='[Main Loop]'):
         neptune_run=neptune_run
     )
     
-    if step % 1 == 0:
+    if epoch % 1 == 0:
         test_acc = knn_evaluation(encoder)
     
-    if logs:
-        neptune_run["linear_eval/test_acc"] .append(test_acc)
+    # if logs:
+    #     neptune_run["linear_eval/test_acc"] .append(test_acc)
 
-    # if step % 5 == 0:
+    # if epoch % 5 == 0:
     #     decoder, ppo_optimizer = ppo_init(config)
     #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
     #         encoder, 
