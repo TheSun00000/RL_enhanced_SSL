@@ -5,7 +5,12 @@ from collections import Counter
 
 
 
-from utils.datasets import get_cifar10_dataloader, rotate_images
+from utils.datasets import (
+    get_cifar10_dataloader, 
+    rotate_images, 
+    plot_images_stacked,
+    select_from_rotated_views   
+)
 from utils.transforms import (
     get_transforms_list,
     apply_transformations
@@ -38,6 +43,32 @@ def test_reward_function(y, magnitude_actions_index):
     reward = reward.sum(dim=-1)
 
     return reward * 1.
+
+
+def distance_between_positions(position1, position2):
+    ax, ay = position1 // 3, position1 % 3
+    bx, by = position2 // 3, position2 % 3
+    distance = ((ax-bx)**2 + (ay-by)**2)**0.5
+    # 2.8284 is the max distance ( the diagonal )
+    return distance / 2.8284
+
+
+def get_transformations_strength(actions):
+    
+    batch_size = actions.shape[0]
+    
+    crop_position1 = actions[..., 0, 0]
+    crop_position2 = actions[..., 1, 0]
+    position_strength = distance_between_positions(crop_position1, crop_position2).float().reshape(batch_size, -1)
+    area_strength = (10 - actions[..., 1].float()).reshape(batch_size, -1) / 10
+    color_jitter_strength = actions[..., 2:6].float().reshape(batch_size, -1) / 10
+    
+    # print(position_strength.mean(dim=1))
+    # print(area_strength.mean(dim=1))
+    # print(color_jitter_strength.mean(dim=1))
+    
+    transformations_strength = position_strength.mean(dim=1) + area_strength.mean(dim=1) + color_jitter_strength.mean(dim=1)
+    return transformations_strength / 3
 
 
 def print_sorted_strings_with_counts(input_list, topk):
@@ -74,6 +105,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
 
     
     mean_rewards = 0
+    mean_rot_reward = 0
+    mean_strength = 0
     mean_entropy = 0    
     
     data_loader_iterator = iter(data_loader)
@@ -103,24 +136,42 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         
         new_img1 = new_img1.to(device)
         new_img2 = new_img2.to(device)
+        
         with torch.no_grad():
-            _, new_z1 = encoder(new_img1)
-            _, new_z2 = encoder(new_img2)
+            # _, new_z1 = encoder(new_img1)
+            # _, new_z2 = encoder(new_img2)
             
-            rotated_x, rotated_labels = rotate_images(new_img1)
+            rotated_x1, rotated_labels1 = rotate_images(new_img1)
+            rotated_x2, rotated_labels2 = rotate_images(new_img2)
+            
+            rotated_x, rotated_labels = select_from_rotated_views(
+                rotated_x1, rotated_x2,
+                rotated_labels1, rotated_labels2
+            )            
+            
+            # print(rotated_labels[:10])
+            # plot_images_stacked(rotated_x[:5], rotated_x[5:10])
+            
             rotated_x = rotated_x.to(device)
             feature = encoder.enc(rotated_x)
             logits = encoder.predictor(feature)
-            rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
-            rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
+            
+            # rot_reward = F.cross_entropy(logits, rotated_labels, reduce=False)
+            # rot_reward = rot_reward.reshape(-1, 4).mean(dim=-1)
+            
+            predicttion = logits.argmax(dim=-1)
+            rot_acc = 1. * (predicttion == rotated_labels)
+            rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
                         
             
         new_img1 = new_img1.to('cpu')
         new_img2 = new_img2.to('cpu')
 
-
-        reward = similariy_reward_function(new_z1, new_z2) - 0.4*rot_loss
-        # reward = test_reward_function(y, magnitude_actions_index)
+        transformations_strength = get_transformations_strength(actions_index)
+        # reward = similariy_reward_function(new_z1, new_z2) + rot_reward
+        
+        # print(transformations_strength)
+        reward = transformations_strength + rot_acc
         
         stored_z[begin:end] = z.detach().cpu()
         stored_log_p[begin:end] = log_p.detach().cpu()
@@ -128,6 +179,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         stored_rewards[begin:end] = reward
         
         mean_rewards += reward.mean().item()
+        mean_rot_reward += rot_acc.mean().item()
+        mean_strength += transformations_strength.mean().item()
         mean_entropy += entropy.item()
 
     
@@ -138,10 +191,14 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     # print_sorted_strings_with_counts(string_transforms, topk=5)
     
     mean_rewards /= (len_trajectory // batch_size)
+    mean_rot_reward /= (len_trajectory // batch_size)
+    mean_strength /= (len_trajectory // batch_size)
     mean_entropy /= (len_trajectory // batch_size)
     
     if logs:
         neptune_run["ppo/reward"].append(mean_rewards)
+        neptune_run["ppo/rot_reward"].append(mean_rot_reward)
+        neptune_run["ppo/strength_reward"].append(mean_strength)
         neptune_run["ppo/mean_entropy"].append(mean_entropy)
 
     return (

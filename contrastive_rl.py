@@ -7,7 +7,12 @@ from neptune.types import File
 import random
 import math
 
-from utils.datasets import get_cifar10_dataloader, rotate_images, plot_images_stacked
+from utils.datasets import (
+    get_cifar10_dataloader, 
+    rotate_images, 
+    plot_images_stacked,
+    select_from_rotated_views
+)
 from utils.networks import SimCLR, DecoderNN_1input, DecoderNoInput, build_resnet18, build_resnet50
 from utils.contrastive import InfoNCELoss, top_k_accuracy, knn_evaluation
 from utils.ppo import (
@@ -261,14 +266,25 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
 
         simclr_loss_item = simclr_loss.item()
         loss = simclr_loss
-        if config['lmbd'] > 0:
-            rotated_x, rotated_labels = rotate_images(x1)
+        if config['lmbd'] > 0:            
+            rotated_x1, rotated_labels1 = rotate_images(x1)
+            rotated_x2, rotated_labels2 = rotate_images(x2)
+            rotated_x, rotated_labels = select_from_rotated_views(
+                rotated_x1, rotated_x2,
+                rotated_labels1, rotated_labels2
+            )
+            
+            # print(rotated_labels[:10])
+            # plot_images_stacked(rotated_x[:5], rotated_x[5:10])
+            
             rotated_x = rotated_x.to(device)
             feature = encoder.enc(rotated_x)
             logits = encoder.predictor(feature)
             rot_loss = F.cross_entropy(logits, rotated_labels)
             loss += config['lmbd'] * rot_loss
-                
+            
+            rot_acc = (logits.argmax(dim=-1) == rotated_labels).sum() / len(rotated_labels)
+                            
         
         optimizer.zero_grad()
         loss.backward()
@@ -280,6 +296,7 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
             if config['lmbd'] > 0:
                 neptune_run["simclr/all_loss"].append(loss.item())
                 neptune_run["simclr/rot_loss"].append(rot_loss.item())
+                neptune_run["simclr/rot_acc"].append(rot_acc.item())
             neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
             neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
         
@@ -330,7 +347,7 @@ config = {
     'warmup_epochs':10,
 
     'simclr_iterations':'all',
-    'simclr_bs':512,
+    'simclr_bs':16,
     'linear_eval_epochs':200,
     'init_random_p':0.5,
     'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
@@ -338,13 +355,13 @@ config = {
     'lr':0.03,
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
-    'ppo_iterations':200,
-    'ppo_len_trajectory':512*2,
-    'ppo_collection_bs':512,
-    'ppo_update_bs':128,
-    'ppo_update_epochs':4,
+    'ppo_iterations':1,
+    'ppo_len_trajectory':4,
+    'ppo_collection_bs':4,
+    'ppo_update_bs':4,
+    'ppo_update_epochs':1,
     
-    'logs':True,
+    'logs':False,
     'model_save_path':model_save_path,
     'seed':seed,
 }
@@ -372,41 +389,41 @@ for epoch in tqdm(range(1, config['epochs']+1), desc='[Main Loop]'):
     random_p = 1
     print('random_p:', epoch, random_p)
     
-    (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
-        encoder,
-        decoder,
-        epoch=epoch,
-        config=config,
-        optimizer=simclr_optimizer, 
-        scheduler=simclr_scheduler, 
-        criterion=simclr_criterion, 
-        random_p=random_p,
-        neptune_run=neptune_run
-    )
+    # (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
+    #     encoder,
+    #     decoder,
+    #     epoch=epoch,
+    #     config=config,
+    #     optimizer=simclr_optimizer, 
+    #     scheduler=simclr_scheduler, 
+    #     criterion=simclr_criterion, 
+    #     random_p=random_p,
+    #     neptune_run=neptune_run
+    # )
     
-    if epoch % 1 == 0:
-        test_acc = knn_evaluation(encoder)
+    # if epoch % 1 == 0:
+    #     test_acc = knn_evaluation(encoder)
     
     # if logs:
     #     neptune_run["linear_eval/test_acc"] .append(test_acc)
 
-    # if epoch % 5 == 0:
-    #     decoder, ppo_optimizer = ppo_init(config)
-    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-    #         encoder, 
-    #         decoder,
-    #         ppo_optimizer,
-    #         config=config,
-    #         neptune_run=neptune_run
-    #     )
+    if epoch % 5 == 0:
+        decoder, ppo_optimizer = ppo_init(config)
+        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+            encoder, 
+            decoder,
+            ppo_optimizer,
+            config=config,
+            neptune_run=neptune_run
+        )
     
     
     
-    torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
-    torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
-    torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
-    torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
-    torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
+    # torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
+    # torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
+    # torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
+    # torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
+    # torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
     
     
     if logs:

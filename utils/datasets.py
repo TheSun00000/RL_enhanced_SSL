@@ -232,3 +232,27 @@ def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, ra
     wrapped_data_loader = DataLoaderWrapper(data_loader, num_steps, encoder=encoder, decoder=decoder, random_p=random_p, spatial_only=spatial_only)
 
     return wrapped_data_loader
+
+
+def select_from_rotated_views(rotated_x1, rotated_x2, rotated_labels1, rotated_labels2):
+    
+    
+    batch_size = rotated_x1.shape[0] // 4
+    
+    # Select images from both img1 and img2
+    rotated_x1, rotated_x2 = rotated_x1.reshape(-1, 4, 3, 32, 32), rotated_x2.reshape(-1, 4, 3, 32, 32)
+    rotated_labels1, rotated_labels2 = rotated_labels1.reshape(-1, 4), rotated_labels2.reshape(-1, 4)
+        
+    rotated_x = torch.concat((rotated_x1, rotated_x2), dim=1)
+    rotated_labels = torch.concat((rotated_labels1, rotated_labels2), dim=1)
+    
+    selected_idx = torch.zeros((batch_size, 4), dtype=torch.long)
+    for i in range(batch_size):
+        selected_idx[i] = torch.randperm(8)[:4]
+    rotated_x = rotated_x[torch.arange(batch_size).unsqueeze(1), selected_idx]
+    rotated_labels = rotated_labels[torch.arange(batch_size).unsqueeze(1), selected_idx]
+    
+    rotated_x, rotated_labels = rotated_x.reshape(-1, 3, 32, 32), rotated_labels.reshape(-1)            
+    
+    
+    return rotated_x, rotated_labels

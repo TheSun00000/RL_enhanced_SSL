@@ -439,7 +439,7 @@ class DecoderNN_1input(nn.Module):
                 
         
         if old_action_index is None:
-            crop_position_index = crop_position_dist.sample()
+            crop_position_index = crop_position_dist.sample().clip(0, 8)
             crop_area_index = crop_area_dist.sample()
             color_magnitude_index = color_magnitude_dist.sample()
             color_permutation_index = color_permutation_dist.sample()
@@ -465,7 +465,8 @@ class DecoderNN_1input(nn.Module):
         blur_proba_log_p = F.log_softmax(blur_proba_logits, dim=-1).gather(-1, blur_proba_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
 
 
-        log_p = (crop_position_log_p + crop_area_log_p) + (color_magnitude_log_p + color_permutation_log_p) + (gray_proba_log_p) + (blur_sigma_log_p + blur_proba_log_p)
+        # log_p = (crop_position_log_p + crop_area_log_p) + (color_magnitude_log_p + color_permutation_log_p) + (gray_proba_log_p) + (blur_sigma_log_p + blur_proba_log_p)
+        log_p = (crop_position_log_p + crop_area_log_p) + (color_magnitude_log_p + color_permutation_log_p) + (gray_proba_log_p)
         # log_p = (color_magnitude_log_p + color_permutation_log_p)
         
         actions_index = torch.concat((
@@ -478,7 +479,8 @@ class DecoderNN_1input(nn.Module):
             blur_proba_index.unsqueeze(-1),
         ), dim=-1)
                 
-        entropy = (crop_position_dist.entropy().mean() + crop_area_dist.entropy().mean()) + (color_magnitude_dist.entropy().mean() + color_permutation_dist.entropy().mean()) + (gray_proba_dist.entropy().mean()) + (blur_sigma_dist.entropy().mean() + blur_proba_dist.entropy().mean())
+        # entropy = (crop_position_dist.entropy().mean() + crop_area_dist.entropy().mean()) + (color_magnitude_dist.entropy().mean() + color_permutation_dist.entropy().mean()) + (gray_proba_dist.entropy().mean()) + (blur_sigma_dist.entropy().mean() + blur_proba_dist.entropy().mean())
+        entropy = (crop_position_dist.entropy().mean() + crop_area_dist.entropy().mean()) + (color_magnitude_dist.entropy().mean() + color_permutation_dist.entropy().mean()) + (gray_proba_dist.entropy().mean())
         
         return (
                 log_p,

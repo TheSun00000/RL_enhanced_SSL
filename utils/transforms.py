@@ -17,7 +17,7 @@ def clip(n, min, max):
         return min
     return n
 
-def custom_crop(img, position, scale):
+def custom_crop(img, position, lower_scale):
     """_summary_
 
     Args:
@@ -35,6 +35,7 @@ def custom_crop(img, position, scale):
     *_, height, width = img.shape
     area = height * width
 
+    scale = torch.empty(1).uniform_(lower_scale, 1).item()
     target_area = area * scale
     log_ratio = torch.log(torch.tensor(ratio))
     aspect_ratio = torch.exp(torch.empty(1).uniform_(log_ratio[0], log_ratio[1])).item()
@@ -58,24 +59,36 @@ def custom_crop(img, position, scale):
     return vision_F.resized_crop(img, i, j, h, w, size=(height, width), antialias="warn")
 
 def adjust_brightness(img, *args):
-    magnitude = args[0]
-    return vision_F.adjust_brightness(img, magnitude)
+    strength = args[0]
+    if torch.rand(1).item() < 0.8:
+        magnitude = torch.empty(1).uniform_(max(1-0.8*strength, 0.2), 1+0.8*strength).item()
+        return vision_F.adjust_brightness(img, magnitude)
+    return img
 
 def adjust_contrast(img, *args):
-    magnitude = args[0]
-    return vision_F.adjust_contrast(img, magnitude)
+    strength = args[0]
+    if torch.rand(1).item() < 0.8:
+        magnitude = torch.empty(1).uniform_(max(1-0.8*strength, 0.2), 1+0.8*strength).item()
+        return vision_F.adjust_contrast(img, magnitude)
+    return img
 
 def adjust_saturation(img, *args):
-    magnitude = args[0]
-    return vision_F.adjust_saturation(img, magnitude)
+    strength = args[0]
+    if torch.rand(1).item() < 0.8:
+        magnitude = torch.empty(1).uniform_(max(1-0.8*strength, 0.2), 1+0.8*strength).item()
+        return vision_F.adjust_saturation(img, magnitude)
+    return img
 
 def adjust_hue(img, *args):
-    magnitude = args[0]
-    return vision_F.adjust_hue(img, magnitude)
+    strength = args[0]
+    if torch.rand(1).item() < 0.8:
+        magnitude = torch.empty(1).uniform_(max(-0.2*strength, -0.5), min(0.2*strength, 0.5)).item()
+        return vision_F.adjust_hue(img, magnitude)
+    return img
 
 def crop_image(img, *args):
-    position, scale = args
-    return custom_crop(img, position, scale)
+    position, lower_scale = args
+    return custom_crop(img, position, lower_scale)
 
 def blur_image(img, *args):
     sigma, proba = args
@@ -96,19 +109,19 @@ def flip_image(img, *args):
 TRANSFORMS_DICT = {
     'brightness': {
         'function':adjust_brightness,
-        'magnitude':((0.6, 1.4))
+        'strength':((0, 2))
     },
     'contrast': {
         'function':adjust_contrast,
-        'magnitude':((0.6, 1.4))
+        'strength':((0, 2))
     },
     'saturation': {
         'function':adjust_saturation,
-        'magnitude':((0.6, 1.4))
+        'strength':((0, 2))
     },
     'hue': {
         'function':adjust_hue,
-        'magnitude':((-0.1, 0.1))
+        'strength':((0, 2))
     },
     'crop': {
         'function':crop_image,
@@ -155,8 +168,8 @@ def get_transforms_list(actions, num_magnitudes):
             color_magnitude_index = actions[i, branch, 2:6]
             color_permutation_index = actions[i, branch, 6]
             gray_proba_index = actions[i, branch, 7]
-            blur_sigma_index = actions[i, branch, 8]
-            blur_proba_index = actions[i, branch, 9]
+            # blur_sigma_index = actions[i, branch, 8]
+            # blur_proba_index = actions[i, branch, 9]
             
             
             areas_list = split_interval(TRANSFORMS_DICT['crop']['area'][0], TRANSFORMS_DICT['crop']['area'][1], num_magnitudes)
@@ -168,9 +181,10 @@ def get_transforms_list(actions, num_magnitudes):
             
             color_transformations = []
             for color_distortion, magnitude_index in zip(['brightness', 'contrast', 'saturation', 'hue'], color_magnitude_index):
-                magnitudes_list = split_interval(TRANSFORMS_DICT[color_distortion]['magnitude'][0], TRANSFORMS_DICT[color_distortion]['magnitude'][1], num_magnitudes)
-                magnitude = magnitudes_list[magnitude_index]
-                color_transformations.append((color_distortion, TRANSFORMS_DICT[color_distortion]['function'], (magnitude,)))
+                strengths_list = split_interval(TRANSFORMS_DICT[color_distortion]['strength'][0], TRANSFORMS_DICT[color_distortion]['strength'][1], num_magnitudes)
+                strength = strengths_list[magnitude_index]
+                color_transformations.append((color_distortion, TRANSFORMS_DICT[color_distortion]['function'], (strength,)))
+                
             color_transformations = [ color_transformations[i] for i in permuatations[color_permutation_index]]
             transform_list += color_transformations
             
@@ -178,11 +192,11 @@ def get_transforms_list(actions, num_magnitudes):
             proba = probas_list[gray_proba_index]
             transform_list.append(('gray', TRANSFORMS_DICT['gray']['function'], (proba,)))
             
-            sigmas_list = split_interval(TRANSFORMS_DICT['blur']['sigma'][0], TRANSFORMS_DICT['blur']['sigma'][1], num_magnitudes)
-            probas_list = split_interval(TRANSFORMS_DICT['blur']['proba'][0], TRANSFORMS_DICT['blur']['proba'][1], num_magnitudes)
-            sigma = sigmas_list[blur_sigma_index]
-            proba = probas_list[blur_proba_index]
-            transform_list.append(('blur', TRANSFORMS_DICT['blur']['function'], (sigma, proba)))
+            # sigmas_list = split_interval(TRANSFORMS_DICT['blur']['sigma'][0], TRANSFORMS_DICT['blur']['sigma'][1], num_magnitudes)
+            # probas_list = split_interval(TRANSFORMS_DICT['blur']['proba'][0], TRANSFORMS_DICT['blur']['proba'][1], num_magnitudes)
+            # sigma = sigmas_list[blur_sigma_index]
+            # proba = probas_list[blur_proba_index]
+            # transform_list.append(('blur', TRANSFORMS_DICT['blur']['function'], (sigma, proba)))
             
             
             branch_transform_lists.append(transform_list)
