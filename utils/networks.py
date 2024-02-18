@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
-from torchvision.models import resnet18, resnet50
+# from torchvision.models import resnet18, resnet50
+from utils.resnet import resnet18, resnet50
 from itertools import permutations
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -17,37 +18,25 @@ class SimCLR(nn.Module):
     def __init__(self, backbone, projection_dim=128):
         super(SimCLR, self).__init__()
         if backbone == 'resnet18':
-            self.enc = resnet18(weights=None)
+            self.enc = resnet18()
+            self.feature_dim = 512
         elif backbone == 'resnet50':
-            self.enc = resnet50(weights=None)
+            self.enc = resnet50()
+            self.feature_dim = 2048
         else:
             raise     
             
-        self.feature_dim = self.enc.fc.in_features
-
-        # Customize for CIFAR10. Replace conv 7x7 with conv 3x3, and remove first max pooling.
-        # See Section B.9 of SimCLR paper.
-        self.enc.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
-        self.enc.maxpool = nn.Identity()
-        self.enc.fc = nn.Identity()  # remove final fully connected layer.
-
-        # Add MLP projection.
-        self.projection_dim = projection_dim
-        # self.projector = nn.Sequential(
-        #     nn.Linear(self.feature_dim, 2048),
-        #     nn.ReLU(),
-        #     nn.Linear(2048, projection_dim)
-        # )
         
+                
         self.projector = nn.Sequential(
             nn.Linear(self.feature_dim, 2048, bias=False),
             nn.BatchNorm1d(2048),
             nn.ReLU(inplace=True),
-            nn.Linear(2048, projection_dim, bias=False),
-            nn.BatchNorm1d(projection_dim, affine=False)
+            nn.Linear(2048, 2048, bias=False),
+            nn.BatchNorm1d(2048, affine=False)
         )
         
-        self.predictor = nn.Sequential(
+        self.predictor2 = nn.Sequential(
             nn.Linear(self.feature_dim, 2048),
             nn.LayerNorm(2048),
             nn.ReLU(inplace=True),  # first layer
@@ -376,13 +365,13 @@ class DecoderNN_1input(nn.Module):
         )
         
         self.model = nn.Sequential(
-            nn.Linear(128, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 2 * self.output_dim_per_view)
+            # nn.Linear(2048, 1024),
+            # nn.ReLU(),
+            # nn.Linear(1024, 1024),
+            # nn.ReLU(),
+            # nn.Linear(1024, 1024),
+            # nn.ReLU(),
+            nn.Linear(2048, 2 * self.output_dim_per_view)
         )
         
         

@@ -6,6 +6,8 @@ from torchvision import transforms
 from torch.utils.data import  DataLoader
 from tqdm import tqdm
 
+from utils.datasets2 import get_essl_memory_loader, get_essl_test_loader
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
 device
@@ -18,7 +20,9 @@ def get_negative_mask(batch_size):
 
     negative_mask = torch.cat((negative_mask, negative_mask), 0)
     return negative_mask
-     
+
+
+
 class InfoNCELoss_(nn.Module):
     def __init__(self, reduction='mean'):
         super(InfoNCELoss, self).__init__()
@@ -59,9 +63,9 @@ class InfoNCELoss_(nn.Module):
     
 
 
-class InfoNCELoss(nn.Module):
+class InfoNCELoss_(nn.Module):
     def __init__(self, reduction='mean'):
-        super(InfoNCELoss, self).__init__()
+        super(InfoNCELoss_, self).__init__()
         self.reduction = reduction
         self.CE = nn.CrossEntropyLoss(reduction=reduction)
 
@@ -96,8 +100,26 @@ class InfoNCELoss(nn.Module):
         return sim, None, loss
     
 
+def info_nce_loss(z1, z2, temperature=0.5, reduction='mean'):
+    z1 = torch.nn.functional.normalize(z1, dim=1)
+    z2 = torch.nn.functional.normalize(z2, dim=1)
 
+    logits = z1 @ z2.T
+    logits /= temperature
+    n = z2.shape[0]
+    labels = torch.arange(0, n, dtype=torch.long).to(device)
+    loss = torch.nn.functional.cross_entropy(logits, labels, reduction=reduction)
+    return loss
 
+class InfoNCELoss(nn.Module):
+    def __init__(self, reduction='mean'):
+        super(InfoNCELoss, self).__init__()
+        self.reduction = reduction
+        self.CE = nn.CrossEntropyLoss(reduction=reduction)
+        
+    def forward(self, z1, z2, temperature):
+        loss = info_nce_loss(z1, z2, temperature, self.reduction) / 2 + info_nce_loss(z2, z1, temperature, self.reduction) / 2
+        return None, None, loss
 
 
 class FeaturesDataset:
@@ -235,7 +257,7 @@ def knn_monitor(net, memory_data_loader, test_data_loader, device='cuda', k=200,
     with torch.no_grad():
         # generate feature bank
         for data, target in memory_data_loader:
-            _, feature = net(data.to(device=device, non_blocking=True))
+            feature = net(data.to(device=device, non_blocking=True))
             feature = F.normalize(feature, dim=1)
             feature_bank.append(feature)
         # [D, N]
@@ -245,7 +267,7 @@ def knn_monitor(net, memory_data_loader, test_data_loader, device='cuda', k=200,
         # loop test data to predict the label by weighted knn search
         for data, target in test_data_loader:
             data, target = data.to(device=device, non_blocking=True), target.to(device=device, non_blocking=True)
-            _, feature = net(data)
+            feature = net(data)
             feature = F.normalize(feature, dim=1)
 
             pred_labels = knn_predict(feature, feature_bank, feature_labels, classes, k, t)
@@ -284,20 +306,23 @@ def knn_predict(feature, feature_bank, feature_labels, classes, knn_k, knn_t):
 
 def knn_evaluation(encoder):
     
-    simple_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
-    ])
+    # simple_transform = transforms.Compose([
+    #     transforms.ToTensor(),
+    #     transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+    # ])
 
-    linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True,  download=True, transform=simple_transform)
-    linear_eval_test_dataset  = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=simple_transform)
-
-    train_loader = DataLoader(linear_eval_train_dataset, batch_size=1024, shuffle=False)
-    test_loader = DataLoader(linear_eval_test_dataset, batch_size=1024, shuffle=False)
+    # linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True,  download=True, transform=simple_transform)
+    # linear_eval_test_dataset  = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=simple_transform)
+    
+    # train_loader = DataLoader(linear_eval_train_dataset, batch_size=1024, shuffle=False)
+    # test_loader = DataLoader(linear_eval_test_dataset, batch_size=1024, shuffle=False)
+    
+    memory_loader = get_essl_memory_loader()
+    test_loader = get_essl_test_loader()
     
     acc = knn_monitor(
-        encoder,
-        train_loader,
+        encoder.enc,
+        memory_loader,
         test_loader,
     )
     

@@ -68,8 +68,8 @@ def rotate_images(images):
     n_rot_images = 4 * nimages
 
     # rotate images all 4 ways at once
-    rotated_images = torch.zeros([nimages, 4, images.shape[1], images.shape[2], images.shape[3]]).to(device)
-    rot_classes = torch.zeros([nimages, 4]).long().to(device)
+    rotated_images = torch.zeros([nimages, 4, images.shape[1], images.shape[2], images.shape[3]])
+    rot_classes = torch.zeros([nimages, 4]).long()
 
     rotated_images[:, 0] = images
     # rotate 90

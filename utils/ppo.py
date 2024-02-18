@@ -26,13 +26,17 @@ device
 
 infonce_reward = InfoNCELoss(reduction='none')
 
+
+def standarize_reward(reward, min, max):
+    return (reward - min)/(max-min)
+
 def similariy_reward_function(new_z1, new_z2):
     return - (F.normalize(new_z1) * F.normalize(new_z2)).sum(axis=-1)
 
 def infonce_reward_function(new_z1, new_z2):
     bs = new_z1.shape[0]
     full_similarity_matrix, logits, loss = infonce_reward(new_z1, new_z2, temperature=0.5)
-    reward = (loss[:bs] + loss[bs:]) / 2
+    reward = loss
     return reward
 
 def test_reward_function(y, magnitude_actions_index):
@@ -107,7 +111,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     mean_rewards = 0
     mean_rot_reward = 0
     mean_strength = 0
-    mean_entropy = 0    
+    mean_entropy = 0
+    mean_infonce_reward = 0 
     
     data_loader_iterator = iter(data_loader)
     for i in range(len_trajectory // batch_size):
@@ -138,8 +143,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         new_img2 = new_img2.to(device)
         
         with torch.no_grad():
-            # _, new_z1 = encoder(new_img1)
-            # _, new_z2 = encoder(new_img2)
+            _, new_z1 = encoder(new_img1)
+            _, new_z2 = encoder(new_img2)
             
             rotated_x1, rotated_labels1 = rotate_images(new_img1)
             rotated_x2, rotated_labels2 = rotate_images(new_img2)
@@ -153,11 +158,13 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
             # plot_images_stacked(rotated_x[:5], rotated_x[5:10])
             
             rotated_x = rotated_x.to(device)
-            feature = encoder.enc(rotated_x)
-            logits = encoder.predictor(feature)
+            rotated_labels = rotated_labels.to(device)
             
-            # rot_reward = F.cross_entropy(logits, rotated_labels, reduce=False)
-            # rot_reward = rot_reward.reshape(-1, 4).mean(dim=-1)
+            feature = encoder.enc(rotated_x)
+            logits = encoder.predictor2(feature)
+            
+            rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
+            rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
             
             predicttion = logits.argmax(dim=-1)
             rot_acc = 1. * (predicttion == rotated_labels)
@@ -168,10 +175,15 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         new_img2 = new_img2.to('cpu')
 
         transformations_strength = get_transformations_strength(actions_index)
-        # reward = similariy_reward_function(new_z1, new_z2) + rot_reward
         
-        # print(transformations_strength)
-        reward = transformations_strength + rot_acc
+        # reward = transformations_strength + rot_acc
+        # reward = similariy_reward_function(new_z1, new_z2) + rot_acc
+        
+        infoNCE_reward = infonce_reward_function(new_z1, new_z2)
+        infoNCE_reward = standarize_reward(infoNCE_reward, 4.5, 5.5)
+        
+        rotation_reward = 1 - standarize_reward(rot_loss, 0, 1.5)
+        reward = infoNCE_reward + rotation_reward
         
         stored_z[begin:end] = z.detach().cpu()
         stored_log_p[begin:end] = log_p.detach().cpu()
@@ -179,7 +191,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         stored_rewards[begin:end] = reward
         
         mean_rewards += reward.mean().item()
-        mean_rot_reward += rot_acc.mean().item()
+        mean_rot_reward += rotation_reward.mean().item()
+        mean_infonce_reward += infoNCE_reward.mean().item()
         mean_strength += transformations_strength.mean().item()
         mean_entropy += entropy.item()
 
@@ -192,12 +205,14 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     
     mean_rewards /= (len_trajectory // batch_size)
     mean_rot_reward /= (len_trajectory // batch_size)
+    mean_infonce_reward /= (len_trajectory // batch_size)
     mean_strength /= (len_trajectory // batch_size)
     mean_entropy /= (len_trajectory // batch_size)
     
     if logs:
         neptune_run["ppo/reward"].append(mean_rewards)
         neptune_run["ppo/rot_reward"].append(mean_rot_reward)
+        neptune_run["ppo/infonce_reward"].append(mean_infonce_reward)
         neptune_run["ppo/strength_reward"].append(mean_strength)
         neptune_run["ppo/mean_entropy"].append(mean_entropy)
 

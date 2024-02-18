@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
 import numpy as np
@@ -13,8 +14,13 @@ from utils.datasets import (
     plot_images_stacked,
     select_from_rotated_views
 )
+from utils.datasets2 import (
+    get_essl_memory_loader,
+    get_essl_train_loader,
+    get_essl_test_loader
+)
 from utils.networks import SimCLR, DecoderNN_1input, DecoderNoInput, build_resnet18, build_resnet50
-from utils.contrastive import InfoNCELoss, top_k_accuracy, knn_evaluation
+from utils.contrastive import InfoNCELoss, top_k_accuracy, knn_evaluation, info_nce_loss, knn_monitor
 from utils.ppo import (
     collect_trajectories_with_input,
     collect_trajectories_no_input,  
@@ -24,10 +30,10 @@ from utils.ppo import (
 )
 from utils.transforms import get_transforms_list
 from utils.logs import init_neptune, get_model_save_path
+from utils.resnet import resnet18
 
-
-seed = random.randint(0, 100000)
-seed = 1
+# seed = random.randint(0, 100000)
+seed = 42
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)  # if you are using multiple GPUs
@@ -44,7 +50,17 @@ model_save_path = get_model_save_path()
 print('model_save_path:', model_save_path)
 
 
-      
+def cuda_memory_usage():
+    t = torch.cuda.get_device_properties(0).total_memory
+    r = torch.cuda.memory_reserved(0)
+    a = torch.cuda.memory_allocated(0)
+    f = r-a
+    
+    print(f'total memory: {t/1024**3:.4f}')
+    print(f'reserved memory: {r/1024**3:.4f}')
+    print(f'allocated memory: {a/1024**3:.4f}')
+    print(f'free memory: {f/1024**3:.4f}')
+    
 
 
 
@@ -97,12 +113,12 @@ def contrastive_init(config):
 
     criterion = InfoNCELoss()
 
-    # optimizer = torch.optim.SGD(
-    #     encoder.parameters(),
-    #     lr=0.01,
-    #     momentum=0.9,
-    #     weight_decay=1e-6,
-    #     nesterov=True)
+    # # # # # # # optimizer = torch.optim.SGD(
+    # # # # # # #     encoder.parameters(),
+    # # # # # # #     lr=0.01,
+    # # # # # # #     momentum=0.9,
+    # # # # # # #     weight_decay=1e-6,
+    # # # # # # #     nesterov=True)
     
     # optimizer = torch.optim.Adam(
     #     encoder.parameters(),
@@ -241,9 +257,14 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
         random_p=random_p,
         spatial_only=False,
     )
+    
+    # train_loader = get_essl_train_loader()
 
     
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader))
+    
+    encoder.train()
+    
     for it, ((x1, x2), y) in tqdm_train_loader:
         
         lr = adjust_learning_rate(epochs=config['epochs'],
@@ -253,33 +274,30 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
             loader=train_loader,
             step=it+(epoch-1)*len(train_loader)
         )
-                
-        # plot_images_stacked(rotated_x, rotated_x)
         
-        x1 = x1.to(device)
-        x2 = x2.to(device)
-        
-        _, z1 = encoder(x1)
-        _, z2 = encoder(x2)
+        _, z1 = encoder(x1.to(device))
+        _, z2 = encoder(x2.to(device))
 
         sim, _, simclr_loss = criterion(z1, z2, temperature=0.5)
 
         simclr_loss_item = simclr_loss.item()
         loss = simclr_loss
+
+        
         if config['lmbd'] > 0:            
             rotated_x1, rotated_labels1 = rotate_images(x1)
             rotated_x2, rotated_labels2 = rotate_images(x2)
+                        
             rotated_x, rotated_labels = select_from_rotated_views(
                 rotated_x1, rotated_x2,
                 rotated_labels1, rotated_labels2
             )
-            
-            # print(rotated_labels[:10])
-            # plot_images_stacked(rotated_x[:5], rotated_x[5:10])
-            
+                             
             rotated_x = rotated_x.to(device)
+            rotated_labels = rotated_labels.to(device)
+            
             feature = encoder.enc(rotated_x)
-            logits = encoder.predictor(feature)
+            logits = encoder.predictor2(feature)
             rot_loss = F.cross_entropy(logits, rotated_labels)
             loss += config['lmbd'] * rot_loss
             
@@ -288,7 +306,6 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
         
         optimizer.zero_grad()
         loss.backward()
-
         optimizer.step()
 
         if logs:
@@ -297,15 +314,15 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
                 neptune_run["simclr/all_loss"].append(loss.item())
                 neptune_run["simclr/rot_loss"].append(rot_loss.item())
                 neptune_run["simclr/rot_acc"].append(rot_acc.item())
-            neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
-            neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
+            # neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
+            # neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
         
         
         
         losses.append( loss.item() )
-        top_1_score.append( top_k_accuracy(sim, 1) )
-        top_5_score.append( top_k_accuracy(sim, 5) )
-        top_10_score.append( top_k_accuracy(sim, 10) )
+        # top_1_score.append( top_k_accuracy(sim, 1) )
+        # top_5_score.append( top_k_accuracy(sim, 5) )
+        # top_10_score.append( top_k_accuracy(sim, 10) )
 
         tqdm_train_loader.set_description(f'[contrastive_round] Loss: {loss.item():.4f}')
 
@@ -315,8 +332,57 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
     
     print('step:{}   lr:{}'.format(it+(epoch-1)*len(train_loader), lr))
     
-    return (sim.cpu().detach(), losses, top_1_score, top_5_score, top_10_score)
+    # return (sim.cpu().detach(), losses, top_1_score, top_5_score, top_10_score)
 
+
+def contrastive_round_2(encoder: SimCLR, decoder, optimizer, scheduler, criterion, random_p, config, epoch, neptune_run):
+    
+    backbone = encoder.enc
+    projector = encoder.projector
+
+    train_loader = get_essl_train_loader()
+    
+    # epoch
+    encoder.train()
+    
+    for it, (inputs, y) in tqdm(enumerate(train_loader), total=len(train_loader)):
+        # adjust
+        
+        lr = adjust_learning_rate(
+            epochs=config['epochs'],
+            warmup_epochs=config['warmup_epochs'],
+            base_lr=config['lr'] * config['simclr_bs'] / 256,
+            optimizer=optimizer,
+            loader=train_loader,
+            step=it+(epoch-1)*len(train_loader)
+        )
+        # zero grad
+        encoder.zero_grad()
+
+        x1 = inputs[0].to(device)
+        x2 = inputs[1].to(device)
+        b1 = backbone(x1)
+        b2 = backbone(x2)
+        z1 = projector(b1)
+        z2 = projector(b2)
+
+        # forward pass
+        loss = info_nce_loss(z1, z2) / 2 + info_nce_loss(z2, z1) / 2
+
+        
+        rotated_images, rotated_labels = rotate_images(inputs[2])
+        
+        rotated_images = rotated_images.to(device)
+        rotated_labels = rotated_labels.to(device)
+        
+        b = backbone(rotated_images)
+        logits = encoder.predictor2(b)
+        rot_loss = F.cross_entropy(logits, rotated_labels)
+        loss += 0.4 * rot_loss
+
+        loss.backward()
+        optimizer.step()
+        
 
 # config = {
 #     'epochs':100,
@@ -347,21 +413,21 @@ config = {
     'warmup_epochs':10,
 
     'simclr_iterations':'all',
-    'simclr_bs':16,
+    'simclr_bs':512,
     'linear_eval_epochs':200,
-    'init_random_p':0.5,
-    'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
+    'random_p':0.5,
+    'encoder_backbone': 'resnet18', # ['resnet18', 'resnet50']
     'lmbd': 0.4,
-    'lr':0.03,
+    'lr':0.06,
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
-    'ppo_iterations':1,
-    'ppo_len_trajectory':4,
-    'ppo_collection_bs':4,
-    'ppo_update_bs':4,
-    'ppo_update_epochs':1,
+    'ppo_iterations':200,
+    'ppo_len_trajectory':512*2,
+    'ppo_collection_bs':512,
+    'ppo_update_bs':128,
+    'ppo_update_epochs':4,
     
-    'logs':False,
+    'logs':True,
     'model_save_path':model_save_path,
     'seed':seed,
 }
@@ -383,31 +449,166 @@ if logs:
 
 stop_ppo = False
 
+
+
+class Branch(nn.Module):
+    def __init__(self, args, encoder=None):
+        super().__init__()
+        dim_proj = [int(x) for x in '2048,2048'.split(',')]
+        if encoder:
+            self.encoder = encoder
+        else:
+            self.encoder = resnet18()
+        self.projector = nn.Sequential(
+            nn.Linear(512, 2048, bias=False),
+            nn.BatchNorm1d(2048),
+            nn.ReLU(inplace=True),
+            nn.Linear(2048, 2048, bias=False),
+            nn.BatchNorm1d(2048, affine=False)
+        )
+        self.net = nn.Sequential(
+            self.encoder,
+            self.projector
+        )
+
+        self.predictor2 = nn.Sequential(nn.Linear(512, 2048),
+                                        nn.LayerNorm(2048),
+                                        nn.ReLU(inplace=True),  # first layer
+                                        nn.Linear(2048, 2048),
+                                        nn.LayerNorm(2048),
+                                        nn.ReLU(inplace=True),
+                                        nn.Linear(2048, 4))  # output layer
+
+    def forward(self, x):
+        return self.net(x)
+
+
+
+def knn_loop(encoder, train_loader, test_loader):
+    accuracy = knn_monitor(net=encoder.cuda(),
+                           memory_data_loader=train_loader,
+                           test_data_loader=test_loader,
+                           device='cuda',
+                           k=200)
+    return accuracy
+
+
+def ssl_loop(args, encoder=None):
+
+
+    # dataset
+    train_loader = get_essl_train_loader()
+    memory_loader = get_essl_memory_loader()
+    test_loader = get_essl_test_loader()
+
+    # models
+
+    # main_branch = Branch(args, encoder=encoder).cuda()
+
+    # # optimization
+    # optimizer = torch.optim.SGD(
+    #     main_branch.parameters(),
+    #     momentum=0.9,
+    #     lr=config['lr'] * config['simclr_bs'] / 256,
+    #     weight_decay=0.0005
+    # )
+
+    # # macros
+    # backbone = main_branch.encoder
+    # projector = main_branch.projector
+    
+    encoder, simclr_optimizer, simclr_scheduler, simclr_criterion = contrastive_init(config)
+    
+    backbone = encoder.enc
+    projector = encoder.projector
+    optimizer = simclr_optimizer
+
+    # training
+    for e in range(1, config['epochs'] + 1):
+        # declaring train
+        encoder.train()
+
+        # epoch
+        for it, (inputs, y) in tqdm(enumerate(train_loader, start=(e - 1) * len(train_loader)), total=len(train_loader)):
+            # adjust
+            lr = adjust_learning_rate(epochs=config['epochs'],
+                                      warmup_epochs=config['warmup_epochs'],
+                                      base_lr=config['lr'] * config['simclr_bs'] / 256,
+                                      optimizer=optimizer,
+                                      loader=train_loader,
+                                      step=it)
+            # zero grad
+            encoder.zero_grad()
+
+            x1 = inputs[0].cuda()
+            x2 = inputs[1].cuda()
+            b1 = backbone(x1)
+            b2 = backbone(x2)
+            z1 = projector(b1)
+            z2 = projector(b2)
+
+            # forward pass
+            loss = info_nce_loss(z1, z2) / 2 + info_nce_loss(z2, z1) / 2
+
+
+            rotated_images, rotated_labels = rotate_images(inputs[2])
+            
+            rotated_images = rotated_images.to(device)
+            rotated_labels = rotated_labels.to(device)
+            
+            b = backbone(rotated_images)
+            logits = encoder.predictor2(b)
+            rot_loss = F.cross_entropy(logits, rotated_labels)
+            loss += 0.4 * rot_loss
+
+            loss.backward()
+            optimizer.step()
+            
+        knn_acc = knn_loop(backbone, memory_loader, test_loader)
+        
+        if logs:
+            neptune_run["linear_eval/test_acc"] .append(knn_acc)
+
+        line_to_print = (
+            f'epoch: {e} | knn_acc: {knn_acc:.3f} | '
+            f'loss: {loss.item():.3f} | lr: {lr:.6f} | '
+        )
+        print(line_to_print)
+
+
+
+
+
+# ssl_loop(None)
+
+
+
+
 for epoch in tqdm(range(1, config['epochs']+1), desc='[Main Loop]'):
     
     # random_p = get_random_p(epoch, config['init_random_p'])
-    random_p = 1
+    random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
     print('random_p:', epoch, random_p)
     
-    # (sim, losses, top_1_score, top_5_score, top_10_score) = contrastive_round(
-    #     encoder,
-    #     decoder,
-    #     epoch=epoch,
-    #     config=config,
-    #     optimizer=simclr_optimizer, 
-    #     scheduler=simclr_scheduler, 
-    #     criterion=simclr_criterion, 
-    #     random_p=random_p,
-    #     neptune_run=neptune_run
-    # )
+    contrastive_round(
+        encoder,
+        decoder,
+        epoch=epoch,
+        config=config,
+        optimizer=simclr_optimizer, 
+        scheduler=simclr_scheduler, 
+        criterion=simclr_criterion, 
+        random_p=random_p,
+        neptune_run=neptune_run
+    )
     
-    # if epoch % 1 == 0:
-    #     test_acc = knn_evaluation(encoder)
+    if epoch % 1 == 0:
+        test_acc = knn_evaluation(encoder)
     
-    # if logs:
-    #     neptune_run["linear_eval/test_acc"] .append(test_acc)
+    if logs:
+        neptune_run["linear_eval/test_acc"] .append(test_acc)
 
-    if epoch % 5 == 0:
+    if (random_p != 1) and ((epoch-1) % 5 == 0):
         decoder, ppo_optimizer = ppo_init(config)
         trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
             encoder, 
@@ -419,11 +620,11 @@ for epoch in tqdm(range(1, config['epochs']+1), desc='[Main Loop]'):
     
     
     
-    # torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
-    # torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
-    # torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
-    # torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
-    # torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
+    torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
+    torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
+    torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
+    torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
+    torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
     
     
     if logs:
@@ -432,8 +633,7 @@ for epoch in tqdm(range(1, config['epochs']+1), desc='[Main Loop]'):
         neptune_run["params/encoder_shd"].upload(f'{model_save_path}/encoder_shd.pt')
         neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
         neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
-    
-    
+
     
 
 if logs:
