@@ -13,7 +13,8 @@ from utils.datasets import (
 )
 from utils.transforms import (
     get_transforms_list,
-    apply_transformations
+    apply_transformations,
+    NUM_DISCREATE
 )
 from utils.contrastive import InfoNCELoss
 
@@ -61,11 +62,14 @@ def get_transformations_strength(actions):
     
     batch_size = actions.shape[0]
     
-    crop_position1 = actions[..., 0, 0]
-    crop_position2 = actions[..., 1, 0]
-    position_strength = distance_between_positions(crop_position1, crop_position2).float().reshape(batch_size, -1)
-    area_strength = (10 - actions[..., 1].float()).reshape(batch_size, -1) / 10
-    color_jitter_strength = actions[..., 2:6].float().reshape(batch_size, -1) / 10
+    # crop_position1 = actions[..., 0, 0]
+    # crop_position2 = actions[..., 1, 0]
+    # position_strength = distance_between_positions(crop_position1, crop_position2).float().reshape(batch_size, -1)
+    # area_strength = (10 - actions[..., 1].float()).reshape(batch_size, -1) / 10
+    color_jitter_strength = (actions[..., 2:6].float().reshape(batch_size, -1) + 1)
+    color_jitter_strength = (color_jitter_strength - (NUM_DISCREATE-1)/2).abs()
+    color_jitter_strength = color_jitter_strength.mean(dim=1) / ((NUM_DISCREATE-1)/2)
+    return color_jitter_strength
     
     # print(position_strength.mean(dim=1))
     # print(area_strength.mean(dim=1))
@@ -87,6 +91,9 @@ def print_sorted_strings_with_counts(input_list, topk):
         print(f"{i}) {string}: {count}")
 
 
+# #########################################################################################################################
+
+
 def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size, logs, neptune_run):
 
     assert len_trajectory % batch_size == 0
@@ -99,7 +106,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     
     normalization = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
 
-    encoder_dim = encoder.projector[3].out_features
+    # encoder_dim = encoder.projector[3].out_features
+    encoder_dim = 2048
 
 
     stored_z = torch.zeros((len_trajectory, encoder_dim))
@@ -125,13 +133,14 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         normalized_img = normalized_img.to(device)
 
         with torch.no_grad():
-            _, z = encoder(normalized_img)
-            log_p, actions_index, entropy = decoder(z)
+            # _, z = encoder(normalized_img)
+            log_p, actions_index, entropy = decoder(batch_size=batch_size)
 
         num_discrete_magnitude = decoder.num_discrete_magnitude
         transforms_list_1, transforms_list_2 = get_transforms_list(
             actions_index,
             num_magnitudes=num_discrete_magnitude)
+        
         new_img1 = apply_transformations(img, transforms_list_1)
         new_img2 = apply_transformations(img, transforms_list_2)
 
@@ -142,33 +151,37 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         new_img1 = new_img1.to(device)
         new_img2 = new_img2.to(device)
         
+        rotation_reward = None
+        infoNCE_reward = None
+        transformations_strength = None
+        
         with torch.no_grad():
             _, new_z1 = encoder(new_img1)
             _, new_z2 = encoder(new_img2)
             
-            rotated_x1, rotated_labels1 = rotate_images(new_img1)
-            rotated_x2, rotated_labels2 = rotate_images(new_img2)
+        #     rotated_x1, rotated_labels1 = rotate_images(new_img1)
+        #     rotated_x2, rotated_labels2 = rotate_images(new_img2)
             
-            rotated_x, rotated_labels = select_from_rotated_views(
-                rotated_x1, rotated_x2,
-                rotated_labels1, rotated_labels2
-            )            
+        #     rotated_x, rotated_labels = select_from_rotated_views(
+        #         rotated_x1, rotated_x2,
+        #         rotated_labels1, rotated_labels2
+        #     )            
             
-            # print(rotated_labels[:10])
-            # plot_images_stacked(rotated_x[:5], rotated_x[5:10])
+        #     # print(rotated_labels[:10])
+        #     # plot_images_stacked(rotated_x[:5], rotated_x[5:10])
             
-            rotated_x = rotated_x.to(device)
-            rotated_labels = rotated_labels.to(device)
+        #     rotated_x = rotated_x.to(device)
+        #     rotated_labels = rotated_labels.to(device)
             
-            feature = encoder.enc(rotated_x)
-            logits = encoder.predictor2(feature)
+        #     feature = encoder.enc(rotated_x)
+        #     logits = encoder.predictor2(feature)
             
-            rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
-            rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
+        #     rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
+        #     rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
             
-            predicttion = logits.argmax(dim=-1)
-            rot_acc = 1. * (predicttion == rotated_labels)
-            rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
+        #     predicttion = logits.argmax(dim=-1)
+        #     rot_acc = 1. * (predicttion == rotated_labels)
+        #     rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
                         
             
         new_img1 = new_img1.to('cpu')
@@ -179,28 +192,36 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         # reward = transformations_strength + rot_acc
         # reward = similariy_reward_function(new_z1, new_z2) + rot_acc
         
-        infoNCE_reward = infonce_reward_function(new_z1, new_z2)
-        infoNCE_reward = standarize_reward(infoNCE_reward, 4.5, 5.5)
+        # infoNCE_reward = infonce_reward_function(new_z1, new_z2)
+        # infoNCE_reward = standarize_reward(infoNCE_reward, 4.5, 5.5)
         
-        rotation_reward = 1 - standarize_reward(rot_loss, 0, 1.5)
-        reward = infoNCE_reward + rotation_reward
+        # rotation_reward = 1 - standarize_reward(rot_loss, 0, 1.5)
+        # reward = infoNCE_reward + rotation_reward
+        # reward=infoNCE_reward
+        reward = similariy_reward_function(new_z1, new_z2)
         
+        z = torch.zeros((batch_size, 2048), dtype=torch.float32)
         stored_z[begin:end] = z.detach().cpu()
         stored_log_p[begin:end] = log_p.detach().cpu()
         stored_actions_index[begin:end]  = actions_index.detach().cpu()
         stored_rewards[begin:end] = reward
         
         mean_rewards += reward.mean().item()
-        mean_rot_reward += rotation_reward.mean().item()
-        mean_infonce_reward += infoNCE_reward.mean().item()
-        mean_strength += transformations_strength.mean().item()
         mean_entropy += entropy.item()
+        
+        if rotation_reward is not None:
+            mean_rot_reward += rotation_reward.mean().item()
+        if infoNCE_reward is not None:
+            mean_infonce_reward += infoNCE_reward.mean().item()
+        if transformations_strength is not None:
+            mean_strength += transformations_strength.mean().item()
 
     
     # string_transforms = []
-    # for trans in transforms_list_1:
-    #     s = ' '.join([ f'{name}_{magnetude}' for (name, _, magnetude) in trans])
-    #     string_transforms.append( s )
+    # for trans1, trans2 in zip(transforms_list_1, transforms_list_2):
+    #     s1 = ' '.join([ f'{name[:4]}_{magnetude}' for (name, _, magnetude) in trans1])
+    #     s2 = ' '.join([ f'{name[:4]}_{magnetude}' for (name, _, magnetude) in trans2])
+    #     string_transforms.append( f'{s1}  ||  {s2}' )
     # print_sorted_strings_with_counts(string_transforms, topk=5)
     
     mean_rewards /= (len_trajectory // batch_size)
@@ -211,10 +232,13 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     
     if logs:
         neptune_run["ppo/reward"].append(mean_rewards)
-        neptune_run["ppo/rot_reward"].append(mean_rot_reward)
-        neptune_run["ppo/infonce_reward"].append(mean_infonce_reward)
-        neptune_run["ppo/strength_reward"].append(mean_strength)
         neptune_run["ppo/mean_entropy"].append(mean_entropy)
+        if rotation_reward is not None:
+            neptune_run["ppo/rot_reward"].append(mean_rot_reward)
+        if infoNCE_reward is not None:
+            neptune_run["ppo/infonce_reward"].append(mean_infonce_reward)
+        if transformations_strength is not None:
+            neptune_run["ppo/strength_reward"].append(mean_strength)
 
     return (
             (stored_z), 
@@ -428,7 +452,7 @@ def ppo_update_with_input(trajectory, decoder, optimizer, ppo_batch_size=256, pp
             actions_index = stored_actions_index[begin:end].to(device).detach()
             reward = stored_rewards[begin:end].to(device).detach()
 
-            new_log_p, new_actions_index, entropy = decoder(z, old_action_index=actions_index)
+            new_log_p, new_actions_index, entropy = decoder(batch_size=ppo_batch_size, old_action_index=actions_index)
             
             assert (actions_index == new_actions_index).all()
             

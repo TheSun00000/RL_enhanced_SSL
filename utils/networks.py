@@ -375,8 +375,12 @@ class DecoderNN_1input(nn.Module):
         )
         
         
-    def forward(self, x, old_action_index=None):
+    def forward(self, x=None, batch_size=None, old_action_index=None):
         
+        if x is None:
+            assert batch_size is not None, "batch_size should be specified"
+            x = torch.zeros((batch_size, 2048), dtype=torch.float32).to(device)
+            
         *leading_dim, input_dim = x.shape
         
         x = F.normalize(x, dim=-1)                     
@@ -455,7 +459,7 @@ class DecoderNN_1input(nn.Module):
 
 
         # log_p = (crop_position_log_p + crop_area_log_p) + (color_magnitude_log_p + color_permutation_log_p) + (gray_proba_log_p) + (blur_sigma_log_p + blur_proba_log_p)
-        log_p = (crop_position_log_p + crop_area_log_p) + (color_magnitude_log_p + color_permutation_log_p) + (gray_proba_log_p)
+        log_p = (color_magnitude_log_p + color_permutation_log_p)
         # log_p = (color_magnitude_log_p + color_permutation_log_p)
         
         actions_index = torch.concat((
@@ -469,13 +473,42 @@ class DecoderNN_1input(nn.Module):
         ), dim=-1)
                 
         # entropy = (crop_position_dist.entropy().mean() + crop_area_dist.entropy().mean()) + (color_magnitude_dist.entropy().mean() + color_permutation_dist.entropy().mean()) + (gray_proba_dist.entropy().mean()) + (blur_sigma_dist.entropy().mean() + blur_proba_dist.entropy().mean())
-        entropy = (crop_position_dist.entropy().mean() + crop_area_dist.entropy().mean()) + (color_magnitude_dist.entropy().mean() + color_permutation_dist.entropy().mean()) + (gray_proba_dist.entropy().mean())
+        entropy = (color_magnitude_dist.entropy().mean() + color_permutation_dist.entropy().mean())
         
         return (
                 log_p,
                 actions_index,
                 entropy
             )
+        
+    
+    def get_distributions(self):
+        x = torch.zeros((1, 2048), dtype=torch.float32).to(device)
+        
+        *leading_dim, input_dim = x.shape
+        
+        x = F.normalize(x, dim=-1)                     
+        output = self.model(x)
+        
+        D = self.num_discrete_magnitude
+        crop_position_offset = 0
+        crop_area_offset = crop_position_offset + 2*D
+        color_magnitude_offset = crop_area_offset + 2*D
+        color_permutation_offset = color_magnitude_offset + 2*(4*D)
+        gray_proba_offset = color_permutation_offset + 2*self.num_transforms_permutations
+        blur_sigma_offset = gray_proba_offset + 2*D
+        blur_proba_offset = blur_sigma_offset + 2*D
+                
+        color_magnitude_logits = output[:, color_magnitude_offset:color_permutation_offset]
+        color_permutation_logits = output[:, color_permutation_offset:gray_proba_offset]
+
+        color_magnitude_logits = color_magnitude_logits.reshape(*leading_dim, 2, 4, D)
+        color_permutation_logits = color_permutation_logits.reshape(*leading_dim, 2, self.num_transforms_permutations)
+        
+        color_magnitude_dist = torch.distributions.Categorical(logits=color_magnitude_logits)
+        color_permutation_dist = torch.distributions.Categorical(logits=color_permutation_logits)
+        
+        return color_magnitude_dist, color_permutation_dist
     
 
 class DecoderNoInput(nn.Module):

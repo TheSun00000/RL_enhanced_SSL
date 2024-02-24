@@ -23,7 +23,7 @@ def get_negative_mask(batch_size):
 
 
 
-class InfoNCELoss_(nn.Module):
+class InfoNCELoss(nn.Module):
     def __init__(self, reduction='mean'):
         super(InfoNCELoss, self).__init__()
         self.CE = nn.CrossEntropyLoss(reduction=reduction)
@@ -111,9 +111,9 @@ def info_nce_loss(z1, z2, temperature=0.5, reduction='mean'):
     loss = torch.nn.functional.cross_entropy(logits, labels, reduction=reduction)
     return loss
 
-class InfoNCELoss(nn.Module):
+class InfoNCELoss_(nn.Module):
     def __init__(self, reduction='mean'):
-        super(InfoNCELoss, self).__init__()
+        super(InfoNCELoss_, self).__init__()
         self.reduction = reduction
         self.CE = nn.CrossEntropyLoss(reduction=reduction)
         

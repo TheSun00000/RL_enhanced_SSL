@@ -7,6 +7,7 @@ from tqdm import tqdm
 from neptune.types import File
 import random
 import math
+import neptune
 
 from utils.datasets import (
     get_cifar10_dataloader, 
@@ -28,12 +29,12 @@ from utils.ppo import (
     ppo_update_no_input,
     print_sorted_strings_with_counts
 )
-from utils.transforms import get_transforms_list
+from utils.transforms import get_transforms_list, NUM_DISCREATE
 from utils.logs import init_neptune, get_model_save_path
 from utils.resnet import resnet18
 
-# seed = random.randint(0, 100000)
-seed = 42
+seed = random.randint(0, 100000)
+# seed = 42
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)  # if you are using multiple GPUs
@@ -73,7 +74,7 @@ def ppo_init(config):
     if config['ppo_decoder']  == 'with_input':
         decoder = DecoderNN_1input(
             num_transforms=5,
-            num_discrete_magnitude=10,
+            num_discrete_magnitude=NUM_DISCREATE,
             device=device
             # embed_size=1024,
             # encoder_dim=128,
@@ -85,7 +86,7 @@ def ppo_init(config):
     elif config['ppo_decoder']  == 'no_input':
         decoder = DecoderNoInput(
             num_transforms=5,
-            num_discrete_magnitude=10,
+            num_discrete_magnitude=NUM_DISCREATE,
             device=device
         )
     
@@ -94,8 +95,13 @@ def ppo_init(config):
     
     optimizer = torch.optim.Adam(
         decoder.parameters(),
-        lr=0.001
+        lr=0.01
     )
+    
+    # if config['checkpoint_params']:
+    #     checkpoint_params = config['checkpoint_params']
+    #     decoder.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder.pt'))
+    #     optimizer.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder_opt.pt'))
 
     return decoder, optimizer
 
@@ -146,6 +152,11 @@ def contrastive_init(config):
             1e-3
         )
     )
+    
+    if config['checkpoint_params']:
+        checkpoint_params = config['checkpoint_params']
+        encoder.load_state_dict(torch.load(f'params/{checkpoint_params}/encoder.pt'))
+        optimizer.load_state_dict(torch.load(f'params/{checkpoint_params}/encoder_opt.pt'))
     
     return encoder, optimizer, scheduler, criterion
 
@@ -263,6 +274,8 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
     
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader))
     
+    lr = None
+    
     encoder.train()
     
     for it, ((x1, x2), y) in tqdm_train_loader:
@@ -330,59 +343,12 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion,
         del x1, x2, loss, _
         torch.cuda.empty_cache()
     
-    print('step:{}   lr:{}'.format(it+(epoch-1)*len(train_loader), lr))
+    if lr:
+        print('step:{}   lr:{}'.format(it+(epoch-1)*len(train_loader), lr))
     
     # return (sim.cpu().detach(), losses, top_1_score, top_5_score, top_10_score)
 
-
-def contrastive_round_2(encoder: SimCLR, decoder, optimizer, scheduler, criterion, random_p, config, epoch, neptune_run):
-    
-    backbone = encoder.enc
-    projector = encoder.projector
-
-    train_loader = get_essl_train_loader()
-    
-    # epoch
-    encoder.train()
-    
-    for it, (inputs, y) in tqdm(enumerate(train_loader), total=len(train_loader)):
-        # adjust
-        
-        lr = adjust_learning_rate(
-            epochs=config['epochs'],
-            warmup_epochs=config['warmup_epochs'],
-            base_lr=config['lr'] * config['simclr_bs'] / 256,
-            optimizer=optimizer,
-            loader=train_loader,
-            step=it+(epoch-1)*len(train_loader)
-        )
-        # zero grad
-        encoder.zero_grad()
-
-        x1 = inputs[0].to(device)
-        x2 = inputs[1].to(device)
-        b1 = backbone(x1)
-        b2 = backbone(x2)
-        z1 = projector(b1)
-        z2 = projector(b2)
-
-        # forward pass
-        loss = info_nce_loss(z1, z2) / 2 + info_nce_loss(z2, z1) / 2
-
-        
-        rotated_images, rotated_labels = rotate_images(inputs[2])
-        
-        rotated_images = rotated_images.to(device)
-        rotated_labels = rotated_labels.to(device)
-        
-        b = backbone(rotated_images)
-        logits = encoder.predictor2(b)
-        rot_loss = F.cross_entropy(logits, rotated_labels)
-        loss += 0.4 * rot_loss
-
-        loss.backward()
-        optimizer.step()
-        
+       
 
 # config = {
 #     'epochs':100,
@@ -409,29 +375,34 @@ def get_random_p(epoch, init_random_p):
 
 
 config = {
-    'epochs':1000,
+    'epochs':800,
     'warmup_epochs':10,
 
     'simclr_iterations':'all',
     'simclr_bs':512,
     'linear_eval_epochs':200,
-    'random_p':0.5,
+    'random_p':0.1,
     'encoder_backbone': 'resnet18', # ['resnet18', 'resnet50']
-    'lmbd': 0.4,
-    'lr':0.06,
+    'lmbd': 0.0,
+    'lr':0.03,
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
-    'ppo_iterations':200,
-    'ppo_len_trajectory':512*2,
-    'ppo_collection_bs':512,
-    'ppo_update_bs':128,
+    'ppo_iterations':500,
+    'ppo_len_trajectory':128,
+    'ppo_collection_bs':128,
+    'ppo_update_bs':16,
     'ppo_update_epochs':4,
     
     'logs':True,
     'model_save_path':model_save_path,
     'seed':seed,
+    
+    # 'checkpoint_id':"",
+    # 'checkpoint_params':"",
+    'checkpoint_id':"SIM-323",
+    'checkpoint_params':'params_433',
+    
 }
-
 
 
 (
@@ -450,145 +421,66 @@ if logs:
 stop_ppo = False
 
 
+start_epoch = 1
 
-class Branch(nn.Module):
-    def __init__(self, args, encoder=None):
-        super().__init__()
-        dim_proj = [int(x) for x in '2048,2048'.split(',')]
-        if encoder:
-            self.encoder = encoder
-        else:
-            self.encoder = resnet18()
-        self.projector = nn.Sequential(
-            nn.Linear(512, 2048, bias=False),
-            nn.BatchNorm1d(2048),
-            nn.ReLU(inplace=True),
-            nn.Linear(2048, 2048, bias=False),
-            nn.BatchNorm1d(2048, affine=False)
-        )
-        self.net = nn.Sequential(
-            self.encoder,
-            self.projector
-        )
-
-        self.predictor2 = nn.Sequential(nn.Linear(512, 2048),
-                                        nn.LayerNorm(2048),
-                                        nn.ReLU(inplace=True),  # first layer
-                                        nn.Linear(2048, 2048),
-                                        nn.LayerNorm(2048),
-                                        nn.ReLU(inplace=True),
-                                        nn.Linear(2048, 4))  # output layer
-
-    def forward(self, x):
-        return self.net(x)
-
-
-
-def knn_loop(encoder, train_loader, test_loader):
-    accuracy = knn_monitor(net=encoder.cuda(),
-                           memory_data_loader=train_loader,
-                           test_data_loader=test_loader,
-                           device='cuda',
-                           k=200)
-    return accuracy
-
-
-def ssl_loop(args, encoder=None):
-
-
-    # dataset
-    train_loader = get_essl_train_loader()
-    memory_loader = get_essl_memory_loader()
-    test_loader = get_essl_test_loader()
-
-    # models
-
-    # main_branch = Branch(args, encoder=encoder).cuda()
-
-    # # optimization
-    # optimizer = torch.optim.SGD(
-    #     main_branch.parameters(),
-    #     momentum=0.9,
-    #     lr=config['lr'] * config['simclr_bs'] / 256,
-    #     weight_decay=0.0005
-    # )
-
-    # # macros
-    # backbone = main_branch.encoder
-    # projector = main_branch.projector
+if config['checkpoint_params']:
     
-    encoder, simclr_optimizer, simclr_scheduler, simclr_criterion = contrastive_init(config)
+    prev_run = neptune.init_run(
+        project="nazim-bendib/simclr-rl",
+        api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIxNDVjNWJkYi1mMTIwLTRmNDItODk3Mi03NTZiNzIzZGNhYzMifQ==",
+        with_id=config['checkpoint_id']
+    )
     
-    backbone = encoder.enc
-    projector = encoder.projector
-    optimizer = simclr_optimizer
-
-    # training
-    for e in range(1, config['epochs'] + 1):
-        # declaring train
-        encoder.train()
-
-        # epoch
-        for it, (inputs, y) in tqdm(enumerate(train_loader, start=(e - 1) * len(train_loader)), total=len(train_loader)):
-            # adjust
-            lr = adjust_learning_rate(epochs=config['epochs'],
-                                      warmup_epochs=config['warmup_epochs'],
-                                      base_lr=config['lr'] * config['simclr_bs'] / 256,
-                                      optimizer=optimizer,
-                                      loader=train_loader,
-                                      step=it)
-            # zero grad
-            encoder.zero_grad()
-
-            x1 = inputs[0].cuda()
-            x2 = inputs[1].cuda()
-            b1 = backbone(x1)
-            b2 = backbone(x2)
-            z1 = projector(b1)
-            z2 = projector(b2)
-
-            # forward pass
-            loss = info_nce_loss(z1, z2) / 2 + info_nce_loss(z2, z1) / 2
-
-
-            rotated_images, rotated_labels = rotate_images(inputs[2])
-            
-            rotated_images = rotated_images.to(device)
-            rotated_labels = rotated_labels.to(device)
-            
-            b = backbone(rotated_images)
-            logits = encoder.predictor2(b)
-            rot_loss = F.cross_entropy(logits, rotated_labels)
-            loss += 0.4 * rot_loss
-
-            loss.backward()
-            optimizer.step()
-            
-        knn_acc = knn_loop(backbone, memory_loader, test_loader)
+    # [tag.split('=')[1] for tag in list(run['sys/tags'].fetch()) if 'model_save_path=' in tag][0]
+    
+    test_acc = prev_run['linear_eval/test_acc'].fetch_values().value.tolist()
+    start_epoch = len(test_acc) + 1
+    
+    if logs:
         
-        if logs:
-            neptune_run["linear_eval/test_acc"] .append(knn_acc)
+        for acc in test_acc:
+            neptune_run["linear_eval/test_acc"].append(acc)
+            
+        loss = prev_run['simclr/loss'].fetch_values().value.tolist()
+        # all_loss = prev_run['simclr/all_loss'].fetch_values().value.tolist()
+        # rot_loss = prev_run['simclr/rot_loss'].fetch_values().value.tolist()
+        # rot_acc = prev_run['simclr/rot_acc'].fetch_values().value.tolist()
+        
+        for i in loss:
+            neptune_run['simclr/loss'].append(i)
+        # for i in all_loss:
+        #     neptune_run['simclr/all_loss'].append(i)
+        # for i in rot_loss:
+        #     neptune_run['simclr/rot_loss'].append(i)
+        # for i in rot_acc:
+        #     neptune_run['simclr/rot_acc'].append(i)
 
-        line_to_print = (
-            f'epoch: {e} | knn_acc: {knn_acc:.3f} | '
-            f'loss: {loss.item():.3f} | lr: {lr:.6f} | '
-        )
-        print(line_to_print)
+    prev_run.stop()
 
 
 
 
-
-# ssl_loop(None)
-
-
-
-
-for epoch in tqdm(range(1, config['epochs']+1), desc='[Main Loop]'):
+for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     # random_p = get_random_p(epoch, config['init_random_p'])
     random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
-    print('random_p:', epoch, random_p)
+    # random_p = 0
+    # print('random_p:', epoch, random_p)
+    print(f'EPOCH:{epoch}    P:{random_p}')
+    
+    
+    
+    if ((epoch-1) % 1 == 0):
+        decoder, ppo_optimizer = ppo_init(config)
+        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+            encoder, 
+            decoder,
+            ppo_optimizer,
+            config=config,
+            neptune_run=neptune_run
+        )
+    
+    
     
     contrastive_round(
         encoder,
@@ -601,22 +493,14 @@ for epoch in tqdm(range(1, config['epochs']+1), desc='[Main Loop]'):
         random_p=random_p,
         neptune_run=neptune_run
     )
-    
+
     if epoch % 1 == 0:
         test_acc = knn_evaluation(encoder)
     
     if logs:
         neptune_run["linear_eval/test_acc"] .append(test_acc)
 
-    if (random_p != 1) and ((epoch-1) % 5 == 0):
-        decoder, ppo_optimizer = ppo_init(config)
-        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-            encoder, 
-            decoder,
-            ppo_optimizer,
-            config=config,
-            neptune_run=neptune_run
-        )
+    
     
     
     
