@@ -10,6 +10,7 @@ device
 
 NUM_DISCREATE = 10
 RANDOM_TRANSFORMATION = False
+MAX_STENGTH = 0.5
 
 def clip(n, min, max):
     if n > max:
@@ -59,7 +60,7 @@ def custom_crop(img, position, lower_scale):
     
     return vision_F.resized_crop(img, i, j, h, w, size=(height, width), antialias="warn")
 
-def adjust_brightness(img, *args):
+def adjust_brightness(img, max_strength, *args):
     magnitude_index = args[0]
     
     if torch.rand(1).item() < 1:
@@ -71,12 +72,14 @@ def adjust_brightness(img, *args):
             )[magnitude_index]
             magnitude = torch.empty(1).uniform_(max(1-0.8*strength, 0.2), 1+0.8*strength).item()
         else:
-            magnitude = split_interval(0.1, 1.9, NUM_DISCREATE)[magnitude_index]        
+            magnitude = split_interval(1-0.8*max_strength, 1+0.8*max_strength, NUM_DISCREATE)[magnitude_index]        
+        
+        magnitude = clip(magnitude, 0.1, 1.9)
         img = vision_F.adjust_brightness(img, magnitude)
     
     return img
 
-def adjust_contrast(img, *args):
+def adjust_contrast(img, max_strength, *args):
     magnitude_index = args[0]
     
     if torch.rand(1).item() < 1:
@@ -88,12 +91,13 @@ def adjust_contrast(img, *args):
             )[magnitude_index]
             magnitude = torch.empty(1).uniform_(max(1-0.8*strength, 0.2), 1+0.8*strength).item()
         else:
-            magnitude = split_interval(0.1, 1.9, NUM_DISCREATE)[magnitude_index]
+            magnitude = split_interval(1-0.8*max_strength, 1+0.8*max_strength, NUM_DISCREATE)[magnitude_index]
+        magnitude = clip(magnitude, 0.1, 1.9)
         img = vision_F.adjust_contrast(img, magnitude)
     
     return img
 
-def adjust_saturation(img, *args):
+def adjust_saturation(img, max_strength, *args):
     magnitude_index = args[0]
     
     if torch.rand(1).item() < 1:
@@ -105,12 +109,13 @@ def adjust_saturation(img, *args):
             )[magnitude_index]
             magnitude = torch.empty(1).uniform_(max(1-0.8*strength, 0.2), 1+0.8*strength).item()
         else:
-            magnitude = split_interval(0.1, 1.9, NUM_DISCREATE)[magnitude_index]  
+            magnitude = split_interval(1-0.8*max_strength, 1+0.8*max_strength, NUM_DISCREATE)[magnitude_index]  
+        magnitude = clip(magnitude, 0.1, 1.9)
         img = vision_F.adjust_saturation(img, magnitude)
     
     return img
 
-def adjust_hue(img, *args):
+def adjust_hue(img, max_strength, *args):
     magnitude_index = args[0]
     
     if torch.rand(1).item() < 1:
@@ -122,7 +127,8 @@ def adjust_hue(img, *args):
             )[magnitude_index]
             magnitude = torch.empty(1).uniform_(max(-0.2*strength, -0.5), min(0.2*strength, 0.5)).item()
         else:
-            magnitude = split_interval(-0.2, 0.2, NUM_DISCREATE)[magnitude_index]
+            magnitude = split_interval(-0.2*max_strength, 0.2*max_strength, NUM_DISCREATE)[magnitude_index]
+        magnitude = clip(magnitude, -0.5, 0.5)
         img = vision_F.adjust_hue(img, magnitude)
     
     return img
@@ -140,7 +146,7 @@ def blur_image(img, *args):
 
 def grayscale_image(img, *args):
     # proba = args[0]
-    proba = 0.5
+    proba = 0.2
     if torch.rand(1).item() < proba:
         return vision_F.rgb_to_grayscale(img, num_output_channels=3)
     return img
@@ -148,6 +154,8 @@ def grayscale_image(img, *args):
 def flip_image(img, *args):
     return transforms.RandomHorizontalFlip(p=0.5)(img)
 
+def is_color_transform(transform):  
+    return transform in ['brightness', 'contrast', 'saturation', 'hue']
 
 TRANSFORMS_DICT = {
     'brightness': {
@@ -261,7 +269,7 @@ def get_transforms_list(actions, num_magnitudes):
 
 
 
-def apply_transformations(img1, transform_list):
+def apply_transformations(img1, transform_list, max_strength):
 
     num_samples = img1.size(0)
     stored_imgs = torch.zeros((num_samples, 3, 32, 32))
@@ -269,7 +277,11 @@ def apply_transformations(img1, transform_list):
     for i in range(img1.size(0)):
         img = img1[i]
         for (transform_name, transform_func, args) in transform_list[i]:
-            img = transform_func(img, *args)
+            if is_color_transform(transform_name):
+                img = transform_func(img, max_strength, *args)
+            else:
+                img = transform_func(img, *args)
+                
         stored_imgs[i] = img
 
     return stored_imgs

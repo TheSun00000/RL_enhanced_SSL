@@ -33,8 +33,8 @@ from utils.transforms import get_transforms_list, NUM_DISCREATE
 from utils.logs import init_neptune, get_model_save_path
 from utils.resnet import resnet18
 
-seed = random.randint(0, 100000)
-# seed = 42
+# seed = random.randint(0, 100000)
+seed = 0
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)  # if you are using multiple GPUs
@@ -188,7 +188,7 @@ def init(config):
     )
     
         
-def ppo_round(encoder, decoder, optimizer, config, neptune_run):
+def ppo_round(encoder, decoder, optimizer, max_strength, config, neptune_run):
     
     ppo_rounds = config['ppo_iterations']
     len_trajectory = config['ppo_len_trajectory'] 
@@ -216,6 +216,7 @@ def ppo_round(encoder, decoder, optimizer, config, neptune_run):
             encoder=encoder,
             decoder=decoder,
             batch_size=batch_size,
+            max_strength=max_strength,
             logs=logs,
             neptune_run=neptune_run
         )
@@ -249,7 +250,7 @@ def ppo_round(encoder, decoder, optimizer, config, neptune_run):
     return trajectory, (img1, img2, new_img1, new_img2), entropy, (losses, rewards)
 
 
-def contrastive_round(encoder: SimCLR, decoder, optimizer, scheduler, criterion, random_p, config, epoch, neptune_run):
+def contrastive_round(encoder: SimCLR, decoder, optimizer, max_strength, scheduler, criterion, random_p, config, epoch, neptune_run):
     
     num_steps = config['simclr_iterations'] 
     batch_size = config['simclr_bs']
@@ -392,6 +393,7 @@ config = {
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
+    'max_strength':0.5,
     
     'logs':True,
     'model_save_path':model_save_path,
@@ -442,18 +444,8 @@ if config['checkpoint_params']:
             neptune_run["linear_eval/test_acc"].append(acc)
             
         loss = prev_run['simclr/loss'].fetch_values().value.tolist()
-        # all_loss = prev_run['simclr/all_loss'].fetch_values().value.tolist()
-        # rot_loss = prev_run['simclr/rot_loss'].fetch_values().value.tolist()
-        # rot_acc = prev_run['simclr/rot_acc'].fetch_values().value.tolist()
-        
         for i in loss:
             neptune_run['simclr/loss'].append(i)
-        # for i in all_loss:
-        #     neptune_run['simclr/all_loss'].append(i)
-        # for i in rot_loss:
-        #     neptune_run['simclr/rot_loss'].append(i)
-        # for i in rot_acc:
-        #     neptune_run['simclr/rot_acc'].append(i)
 
     prev_run.stop()
 
@@ -462,20 +454,19 @@ if config['checkpoint_params']:
 
 for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
-    # random_p = get_random_p(epoch, config['init_random_p'])
     random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
-    # random_p = 0
-    # print('random_p:', epoch, random_p)
-    print(f'EPOCH:{epoch}    P:{random_p}')
+    max_strength = config['max_strength']
+    print(f'EPOCH:{epoch}    P:{random_p}  Strength:{max_strength}')
     
     
     
-    if ((epoch-1) % 1 == 0):
+    if ((epoch-1) % 5 == 0):
         decoder, ppo_optimizer = ppo_init(config)
         trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-            encoder, 
-            decoder,
-            ppo_optimizer,
+            encoder=encoder, 
+            decoder=decoder,
+            optimizer=ppo_optimizer,
+            max_strength=max_strength,
             config=config,
             neptune_run=neptune_run
         )
@@ -483,8 +474,9 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     
     contrastive_round(
-        encoder,
-        decoder,
+        encoder=encoder,
+        decoder=decoder,
+        max_strength=max_strength,
         epoch=epoch,
         config=config,
         optimizer=simclr_optimizer, 

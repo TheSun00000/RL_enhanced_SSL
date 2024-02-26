@@ -108,13 +108,15 @@ class MyDatset(Dataset):
     
 
 class DataLoaderWrapper:
-    def __init__(self, dataloder, steps, encoder, decoder, random_p, spatial_only):
+    def __init__(self, dataloder, steps, encoder, decoder, max_strength, random_p, spatial_only):
         self.dataloder = dataloder
         self.steps = steps
         self.encoder = encoder
         self.decoder = decoder
         self.random_p = random_p
         self.spatial_only = spatial_only
+        
+        self.max_strength = max_strength
         
         self.random_transformation = transforms.Compose([
             transforms.ToPILImage(),
@@ -178,8 +180,8 @@ class DataLoaderWrapper:
                     magnitude_actions_index,
                     num_magnitudes=num_discrete_magnitude)
             
-            decoder_x1 = apply_transformations(decoder_x1, transforms_list_1)
-            decoder_x2 = apply_transformations(decoder_x2, transforms_list_2)
+            decoder_x1 = apply_transformations(decoder_x1, transforms_list_1, self.max_strength)
+            decoder_x2 = apply_transformations(decoder_x2, transforms_list_2, self.max_strength)
 
             decoder_x1 = torch.stack([self.normalization(tensor) for tensor in decoder_x1])
             decoder_x2 = torch.stack([self.normalization(tensor) for tensor in decoder_x2])
@@ -225,11 +227,19 @@ class DataLoaderWrapper:
           
 
 
-def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, random_p=0, spatial_only=False):
+def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, max_strength=0.5, random_p=0, spatial_only=False):
         
     dataset = MyDatset(cifar10_dataset)
     data_loader = DataLoader(dataset, batch_size=batch_size, drop_last=True, shuffle=True)
-    wrapped_data_loader = DataLoaderWrapper(data_loader, num_steps, encoder=encoder, decoder=decoder, random_p=random_p, spatial_only=spatial_only)
+    wrapped_data_loader = DataLoaderWrapper(
+        data_loader,
+        num_steps,
+        encoder=encoder,
+        decoder=decoder,
+        max_strength=max_strength,
+        random_p=random_p,
+        spatial_only=spatial_only
+    )
 
     return wrapped_data_loader
 

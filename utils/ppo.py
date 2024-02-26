@@ -66,7 +66,7 @@ def get_transformations_strength(actions):
     # crop_position2 = actions[..., 1, 0]
     # position_strength = distance_between_positions(crop_position1, crop_position2).float().reshape(batch_size, -1)
     # area_strength = (10 - actions[..., 1].float()).reshape(batch_size, -1) / 10
-    color_jitter_strength = (actions[..., 2:6].float().reshape(batch_size, -1) + 1)
+    color_jitter_strength = (actions[..., 2:6].float().reshape(batch_size, -1))
     color_jitter_strength = (color_jitter_strength - (NUM_DISCREATE-1)/2).abs()
     color_jitter_strength = color_jitter_strength.mean(dim=1) / ((NUM_DISCREATE-1)/2)
     return color_jitter_strength
@@ -94,7 +94,7 @@ def print_sorted_strings_with_counts(input_list, topk):
 # #########################################################################################################################
 
 
-def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size, logs, neptune_run):
+def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size, max_strength, logs, neptune_run):
 
     assert len_trajectory % batch_size == 0
 
@@ -141,8 +141,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
             actions_index,
             num_magnitudes=num_discrete_magnitude)
         
-        new_img1 = apply_transformations(img, transforms_list_1)
-        new_img2 = apply_transformations(img, transforms_list_2)
+        new_img1 = apply_transformations(img, transforms_list_1, max_strength)
+        new_img2 = apply_transformations(img, transforms_list_2, max_strength)
 
         new_img1 = torch.stack([normalization(tensor) for tensor in new_img1])
         new_img2 = torch.stack([normalization(tensor) for tensor in new_img2])
