@@ -208,7 +208,7 @@ def ppo_round(encoder, decoder, optimizer, max_strength, config, neptune_run):
     losses = []
     rewards = []
     
-    tqdm_range = tqdm(range(ppo_rounds))
+    tqdm_range = tqdm(range(ppo_rounds), miniters=ppo_rounds//10, desc='[ppo_round]')
     for round_ in tqdm_range:
     
         trajectory, (img1, img2, new_img1, new_img2), entropy = collect_trajectories(
@@ -232,7 +232,7 @@ def ppo_round(encoder, decoder, optimizer, max_strength, config, neptune_run):
         losses.append(loss)
         rewards.append(float(trajectory[-1].mean()))
         
-        tqdm_range.set_description(f'[ppo_round] Reward: {rewards[-1]:.4f}')
+        # tqdm_range.set_description(f'[ppo_round] Reward: {rewards[-1]:.4f}')
         
     stored_actions_index = trajectory[2]
     transforms_list_1, transforms_list_2 = get_transforms_list(
@@ -273,7 +273,7 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, max_strength, schedul
     # train_loader = get_essl_train_loader()
 
     
-    tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader))
+    tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), miniters=len(train_loader)//10, desc='[contrastive_round]')
     
     lr = None
     
@@ -338,7 +338,7 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, max_strength, schedul
         # top_5_score.append( top_k_accuracy(sim, 5) )
         # top_10_score.append( top_k_accuracy(sim, 10) )
 
-        tqdm_train_loader.set_description(f'[contrastive_round] Loss: {loss.item():.4f}')
+        # tqdm_train_loader.set_description(f'[contrastive_round] Loss: {loss.item():.4f}')
 
 
         del x1, x2, loss, _
@@ -415,7 +415,8 @@ config = {
 
 
 logs = config['logs']
-neptune_run = init_neptune(['contrastive_rl'] + [f'{k}={v}' for (k, v) in config.items()]) if logs else None
+logs_keys = ['random_p', 'max_strength', 'ppo_iterations']
+neptune_run = init_neptune(['contrastive_rl'] + [f'{k}={config[k]}' for (k) in logs_keys]) if logs else None
 
 if logs:
     neptune_run["scripts"].upload_files(["./utils/*.py", "./*.py"])

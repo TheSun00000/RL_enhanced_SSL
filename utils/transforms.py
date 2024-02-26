@@ -146,7 +146,7 @@ def blur_image(img, *args):
 
 def grayscale_image(img, *args):
     # proba = args[0]
-    proba = 0.2
+    proba = 0.5
     if torch.rand(1).item() < proba:
         return vision_F.rgb_to_grayscale(img, num_output_channels=3)
     return img
