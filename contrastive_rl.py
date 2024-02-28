@@ -379,10 +379,10 @@ config = {
     'model_save_path':model_save_path,
     'seed':seed,
     
-    # 'checkpoint_id':"",
-    # 'checkpoint_params':"",
-    'checkpoint_id':"SIM-323",
-    'checkpoint_params':'params_433',
+    'checkpoint_id':"",
+    'checkpoint_params':"",
+    # 'checkpoint_id':"SIM-323",
+    # 'checkpoint_params':'params_433',
     
 }
 
@@ -441,16 +441,16 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     
     
-    if ((epoch-1) % 5 == 0):
-        decoder, ppo_optimizer = ppo_init(config)
-        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-            encoder=encoder, 
-            decoder=decoder,
-            optimizer=ppo_optimizer,
-            max_strength=max_strength,
-            config=config,
-            neptune_run=neptune_run
-        )
+    # if ((epoch-1) % 5 == 0):
+    #     decoder, ppo_optimizer = ppo_init(config)
+    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+    #         encoder=encoder, 
+    #         decoder=decoder,
+    #         optimizer=ppo_optimizer,
+    #         max_strength=max_strength,
+    #         config=config,
+    #         neptune_run=neptune_run
+    #     )
     
     
     

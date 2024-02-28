@@ -257,7 +257,7 @@ class DataLoaderWrapper:
         new_x2[x2_random_aug_idx] = random_x2
         new_x2[x2_ppo_aug_idx] = decoder_x2
         
-        plot_images_stacked(new_x1[:10], new_x2[:10])
+        # plot_images_stacked(new_x1[:10], new_x2[:10])
               
         return (new_x1, new_x2)
      

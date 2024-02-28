@@ -3,6 +3,8 @@ from torchvision import transforms
 from torchvision.transforms import functional as vision_F
 import numpy as np
 from itertools import permutations
+import random
+
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
@@ -61,7 +63,8 @@ def custom_crop(img, position, lower_scale):
     return vision_F.resized_crop(img, i, j, h, w, size=(height, width), antialias="warn")
 
 def adjust_brightness(img, max_strength, *args):
-    magnitude_index = args[0]
+    # magnitude_index = args[0]
+    magnitude_index = random.randint(0, NUM_DISCREATE-1)
     
     if torch.rand(1).item() < 1:
         if RANDOM_TRANSFORMATION:
@@ -80,7 +83,8 @@ def adjust_brightness(img, max_strength, *args):
     return img
 
 def adjust_contrast(img, max_strength, *args):
-    magnitude_index = args[0]
+    # magnitude_index = args[0]
+    magnitude_index = random.randint(0, NUM_DISCREATE-1)
     
     if torch.rand(1).item() < 1:
         if RANDOM_TRANSFORMATION:
@@ -98,7 +102,8 @@ def adjust_contrast(img, max_strength, *args):
     return img
 
 def adjust_saturation(img, max_strength, *args):
-    magnitude_index = args[0]
+    # magnitude_index = args[0]
+    magnitude_index = random.randint(0, NUM_DISCREATE-1)
     
     if torch.rand(1).item() < 1:
         if RANDOM_TRANSFORMATION:
@@ -116,7 +121,8 @@ def adjust_saturation(img, max_strength, *args):
     return img
 
 def adjust_hue(img, max_strength, *args):
-    magnitude_index = args[0]
+    # magnitude_index = args[0]
+    magnitude_index = random.randint(0, NUM_DISCREATE-1)
     
     if torch.rand(1).item() < 1:
         if RANDOM_TRANSFORMATION:
@@ -154,8 +160,94 @@ def grayscale_image(img, *args):
 def flip_image(img, *args):
     return transforms.RandomHorizontalFlip(p=0.5)(img)
 
+def affine_transform(img, *args):
+    
+    # degree_index, shear_x_index, shear_y_index = args
+    degree_index = random.randint(0, NUM_DISCREATE-1)
+    shear_x_index = random.randint(0, NUM_DISCREATE-1)
+    shear_y_index = random.randint(0, NUM_DISCREATE-1)
+    
+    c, h, w = img.shape
+    
+    if torch.rand(1).item() < 0.8:
+        if RANDOM_TRANSFORMATION:
+            raise NotImplementedError
+        else:
+            angle = split_interval(-30, 30, NUM_DISCREATE)[degree_index]
+            shear_x = split_interval(-20, 20, NUM_DISCREATE)[shear_x_index]
+            shear_y = split_interval(-20, 20, NUM_DISCREATE)[shear_y_index]
+            
+            tb = round(0.1*min(h, w))
+            trans_x = torch.randint(-tb, tb, size=(1,))
+            trans_y = torch.randint(-tb, tb, size=(1,))  
+        
+        img = vision_F.affine(
+            img,
+            angle=angle,
+            translate=(trans_x, trans_y),
+            scale=1,
+            shear=(shear_x, shear_y),
+        )
+    
+    return img
+
+def autocontrast_image(img, *args):
+    if torch.rand(1).item() < 0.5:
+        img = vision_F.autocontrast(img)
+    return img
+
+def posterize_image(img, *args):
+    
+    # magnitude_index = args[0]
+    magnitude_index = random.randint(0, NUM_DISCREATE-1)
+    
+    if torch.rand(1).item() < 5:
+        if RANDOM_TRANSFORMATION:
+            raise NotImplementedError
+        else:
+            magnitude = split_interval(1, 8, NUM_DISCREATE)[magnitude_index]
+            magnitude = int(round(magnitude))
+        
+        print(magnitude)
+        img = vision_F.posterize(img, magnitude)
+    
+    return img
+
+def Cutout(img, *args):  # [0, 60] => percentage: [0, 0.2]
+    # action = args[0]
+    
+    if torch.rand(1).item() < 0.5:
+        action = random.randint(0, NUM_DISCREATE-1)
+        v = split_interval(0, 0.2, NUM_DISCREATE)[action]
+        
+        
+        if v <= 0.:
+            return img
+
+        c, w, h = img.shape
+        
+        v = v * min(w, h)
+        
+        x0 = int(torch.rand(1).item() * w)
+        y0 = int(torch.rand(1).item() * h)
+
+        x0 = round(max(0, x0 - int(v / 2.)))
+        y0 = round(max(0, y0 - int(v / 2.)))
+        x1 = round(min(w, x0 + v))
+        y1 = round(min(h, y0 + v))
+        
+        color = (0.5, 0.5, 0.5)
+        print(x0, x1, y0, y1)
+        new_img = img.clone()
+        new_img[:, x0:x1, y0:y1] = torch.tensor(color, dtype=torch.uint8).unsqueeze(1).unsqueeze(2)
+        return new_img
+    
+    return img
+
+
 def is_color_transform(transform):  
     return transform in ['brightness', 'contrast', 'saturation', 'hue']
+
 
 TRANSFORMS_DICT = {
     'brightness': {
@@ -190,7 +282,24 @@ TRANSFORMS_DICT = {
     },
     'flip': {
         'function':flip_image
+    },
+    'affine': {
+        'function':affine_transform,
+        'degree':(-30, 30),
+        'shear_x':(-20, 20),
+        'shear_x':(-20, 20),
+    },
+    'autocontrast': {
+        'function':autocontrast_image
+    },
+    'posterize': {
+        'function':posterize_image,
+        'bits':(1, 8),
+    },
+    'cutout':{
+        'function':Cutout
     }
+    
 }
 
 permuatations = list(permutations(range(4)))
@@ -228,7 +337,7 @@ def get_transforms_list(actions, num_magnitudes):
             position = crop_position_index.item()
             # transform_list.append(('crop', TRANSFORMS_DICT['crop']['function'], (position, area)))
             transform_list.append(('crop', TRANSFORMS_DICT['crop']['function'], ()))
-            
+            transform_list.append(('affine', TRANSFORMS_DICT['affine']['function'], ()))
             transform_list.append(('flip', TRANSFORMS_DICT['flip']['function'], ()))
             
             
@@ -249,10 +358,12 @@ def get_transforms_list(actions, num_magnitudes):
             
             
             
-            probas_list = split_interval(TRANSFORMS_DICT['gray']['proba'][0], TRANSFORMS_DICT['gray']['proba'][1], num_magnitudes)
-            proba = probas_list[gray_proba_index]
+            # probas_list = split_interval(TRANSFORMS_DICT['gray']['proba'][0], TRANSFORMS_DICT['gray']['proba'][1], num_magnitudes)
+            # proba = probas_list[gray_proba_index]
             # transform_list.append(('gray', TRANSFORMS_DICT['gray']['function'], (proba,)))
             transform_list.append(('gray', TRANSFORMS_DICT['gray']['function'], ()))
+            transform_list.append(('autocontrast', TRANSFORMS_DICT['autocontrast']['function'], ()))
+            transform_list.append(('cutout', TRANSFORMS_DICT['cutout']['function'], ()))
             
             # sigmas_list = split_interval(TRANSFORMS_DICT['blur']['sigma'][0], TRANSFORMS_DICT['blur']['sigma'][1], num_magnitudes)
             # probas_list = split_interval(TRANSFORMS_DICT['blur']['proba'][0], TRANSFORMS_DICT['blur']['proba'][1], num_magnitudes)
