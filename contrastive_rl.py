@@ -208,7 +208,7 @@ def ppo_round(encoder, decoder, optimizer, max_strength, config, neptune_run):
     losses = []
     rewards = []
     
-    tqdm_range = tqdm(range(ppo_rounds), miniters=ppo_rounds//10, desc='[ppo_round]')
+    tqdm_range = tqdm(range(ppo_rounds), desc='[ppo_round]')
     for round_ in tqdm_range:
     
         trajectory, (img1, img2, new_img1, new_img2), entropy = collect_trajectories(
@@ -273,7 +273,7 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, max_strength, schedul
     # train_loader = get_essl_train_loader()
 
     
-    tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), miniters=len(train_loader)//10, desc='[contrastive_round]')
+    tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[contrastive_round]')
     
     lr = None
     
@@ -351,26 +351,6 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, max_strength, schedul
 
        
 
-# config = {
-#     'epochs':100,
-    
-#     'simclr_iterations':50,
-#     'simclr_bs':1024,
-#     'linear_eval_epochs':100,
-    
-#     'ppo_decoder': 'no_input', # ['no_input', 'with_input']
-#     'ppo_iterations':100,
-#     'ppo_len_trajectory':512*4,
-#     'ppo_collection_bs':512*2,
-#     'ppo_update_bs':256,
-#     'ppo_update_epochs':4,
-    
-#     'logs':True,
-#     'model_save_path':model_save_path,
-#     'seed':seed,
-    
-# }
-
 def get_random_p(epoch, init_random_p):
     return 1 - (1 - min(epoch, 40)/40)*init_random_p
 
@@ -382,18 +362,18 @@ config = {
     'simclr_iterations':'all',
     'simclr_bs':512,
     'linear_eval_epochs':200,
-    'random_p':0.1,
+    'random_p':0.0,
     'encoder_backbone': 'resnet18', # ['resnet18', 'resnet50']
     'lmbd': 0.0,
     'lr':0.03,
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
-    'ppo_iterations':500,
+    'ppo_iterations':200,
     'ppo_len_trajectory':128,
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
-    'max_strength':0.5,
+    'max_strength':1,
     
     'logs':True,
     'model_save_path':model_save_path,
