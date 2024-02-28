@@ -482,8 +482,8 @@ class DecoderNN_1input(nn.Module):
             )
         
     
-    def get_distributions(self):
-        x = torch.zeros((1, 2048), dtype=torch.float32).to(device)
+    def sample(self, num_samples):
+        x = torch.zeros((1, 2048), dtype=torch.float32).to(self.device)
         
         *leading_dim, input_dim = x.shape
         
@@ -508,7 +508,20 @@ class DecoderNN_1input(nn.Module):
         color_magnitude_dist = torch.distributions.Categorical(logits=color_magnitude_logits)
         color_permutation_dist = torch.distributions.Categorical(logits=color_permutation_logits)
         
-        return color_magnitude_dist, color_permutation_dist
+        color_magnitude_index, color_permutation_index = color_magnitude_dist.sample((num_samples,)), color_permutation_dist.sample((num_samples,))
+
+        actions_index = torch.concat((
+            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
+            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
+            color_magnitude_index.squeeze(1),
+            color_permutation_index.squeeze(1).unsqueeze(-1),
+            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
+            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
+            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
+        ), dim=-1)
+
+        
+        return actions_index
     
 
 class DecoderNoInput(nn.Module):
