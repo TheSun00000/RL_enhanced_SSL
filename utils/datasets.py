@@ -97,6 +97,23 @@ def select(list, ids):
 cifar10_dataset = torchvision.datasets.CIFAR10('dataset', download=True)
 
 
+
+class FeatureDataset(Dataset):
+    def __init__(self, features, targets):
+        super().__init__()
+        self.features = features
+        self.targets = targets
+        
+    def __len__(self):
+        return len(self.features)
+    
+    def __getitem__(self, idx):
+        x = self.features[idx]
+        y = self.targets[idx]
+        return x, y
+    
+    
+
 class MyDatset(Dataset):
     def __init__(self, train_dataset):
         self.train_dataset = train_dataset

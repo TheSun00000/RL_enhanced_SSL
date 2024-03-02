@@ -146,7 +146,8 @@ def SamplePairing(imgs):  # [0, 0.4]
 
     return f
 
-
+def Identity(img, v):
+    return img
 
 
 transformations_list = [
@@ -165,7 +166,7 @@ transformations_list = [
         (Brightness, 0.1, 1.9),  # 12
         (Sharpness, 0.1, 1.9),  # 13
         (Cutout, 0, 0.2),  # 14
-        # (SamplePairing(imgs), 0, 0.4),  # 15 
+        (Identity, 0, 1)
     ]
 
 transformations_dict = {fn.__name__: (fn, v1, v2) for fn, v1, v2 in transformations_list}

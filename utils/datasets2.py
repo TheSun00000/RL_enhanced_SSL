@@ -24,12 +24,13 @@ class ContrastiveLearningTransform:
         self.transform_rotation = T.Compose(transforms_rotation)
 
     def __call__(self, x):
-        output = [
-            single_transform(self.transform(x)),
-            single_transform(self.transform(x)),
-            single_transform(self.transform_rotation(x))
-        ]
-        return output
+        # output = [
+        #     single_transform(self.transform(x)),
+        #     single_transform(self.transform(x)),
+        #     single_transform(self.transform_rotation(x))
+        # ]
+        # return output
+        return single_transform(self.transform(x))
     
     
 train_loader = torch.utils.data.DataLoader(
@@ -39,7 +40,7 @@ train_loader = torch.utils.data.DataLoader(
     shuffle=True,
     batch_size=512,
     pin_memory=True,
-    num_workers=1,
+    # num_workers=1,
     drop_last=True
 )
 memory_loader = torch.utils.data.DataLoader(

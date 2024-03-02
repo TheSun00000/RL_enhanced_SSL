@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
 import numpy as np
 from tqdm import tqdm
@@ -13,11 +14,15 @@ from utils.datasets import (
     get_cifar10_dataloader, 
     rotate_images, 
     plot_images_stacked,
-    select_from_rotated_views
+    select_from_rotated_views,
+    FeatureDataset
 )
-
-from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50
-from utils.contrastive import InfoNCELoss, top_k_accuracy, knn_evaluation, info_nce_loss, knn_monitor
+from utils.datasets2 import (
+    get_essl_train_loader,
+    get_essl_memory_loader
+)
+from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50, Predictor
+from utils.contrastive import InfoNCELoss, knn_evaluation
 from utils.ppo import (
     collect_trajectories_with_input,
     ppo_update_with_input,
@@ -27,8 +32,8 @@ from utils.transforms import get_transforms_list, NUM_DISCREATE, transformations
 from utils.logs import init_neptune, get_model_save_path
 from utils.resnet import resnet18
 
-# seed = random.randint(0, 100000)
-seed = 0
+seed = random.randint(0, 100000)
+# seed = 0
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)  # if you are using multiple GPUs
@@ -79,7 +84,7 @@ def ppo_init(config):
     
     optimizer = torch.optim.Adam(
         decoder.parameters(),
-        lr=0.01
+        lr=0.00005
     )
     
     # if config['checkpoint_params']:
@@ -98,7 +103,7 @@ def contrastive_init(config):
         encoder = build_resnet50()
     
     
-    # encoder.load_state_dict(torch.load('params/params_222/encoder.pt'))
+    encoder.load_state_dict(torch.load('params_/best_encoder.pt'))
     encoder = encoder.to(device)
 
     criterion = InfoNCELoss()
@@ -172,7 +177,7 @@ def init(config):
     )
     
         
-def ppo_round(encoder, decoder, optimizer, max_strength, config, neptune_run):
+def ppo_round(encoder, decoder, predictor, optimizer, max_strength, config, neptune_run):
     
     ppo_rounds = config['ppo_iterations']
     len_trajectory = config['ppo_len_trajectory'] 
@@ -184,9 +189,8 @@ def ppo_round(encoder, decoder, optimizer, max_strength, config, neptune_run):
     if config['ppo_decoder'] == 'with_input':
         collect_trajectories = collect_trajectories_with_input
         ppo_update = ppo_update_with_input
-    elif config['ppo_decoder'] == 'no_input':
-        collect_trajectories = collect_trajectories_no_input
-        ppo_update = ppo_update_no_input
+    else:
+        raise NotImplementedError
         
     
     losses = []
@@ -199,6 +203,7 @@ def ppo_round(encoder, decoder, optimizer, max_strength, config, neptune_run):
             len_trajectory=len_trajectory,
             encoder=encoder,
             decoder=decoder,
+            predictor=predictor,
             batch_size=batch_size,
             max_strength=max_strength,
             logs=logs,
@@ -333,7 +338,114 @@ def contrastive_round(encoder: SimCLR, decoder, optimizer, max_strength, schedul
     
     # return (sim.cpu().detach(), losses, top_1_score, top_5_score, top_10_score)
 
-       
+
+def train_rotation_predictor_(encoder):
+    
+    data_loader = get_essl_memory_loader()
+    
+    predictor = Predictor(num_classes=4, feature_dim=512).to(device)
+    
+    # predictor.load_state_dict(torch.load('params_/rotation_predictor.pt'))
+    # return predictor
+    
+    optimizer = torch.optim.Adam(predictor.parameters(), lr=0.001)
+    
+    encoder.eval()
+    # feature_bank = torch.zeros((len(data_loader.dataset)*4, 512), dtype=torch.float32).to(device)
+    feature_bank = []
+    labels = []
+    
+    i = 0
+    with torch.no_grad():
+        # generate feature bank
+        for image, _ in tqdm(data_loader, desc='rotation_pred', total=len(data_loader)):
+            
+            rotated_x, rotated_labels = rotate_images(image)
+            rotated_x = rotated_x.to(device, non_blocking=True)
+            rotated_labels = rotated_labels.to(device, non_blocking=True)
+            
+            feature = encoder.enc(rotated_x)
+            feature = F.normalize(feature, dim=1)
+            # print(feature.shape)
+            feature_bank.append(feature)
+            labels.append(rotated_labels)
+            i += 1
+            
+    feature_bank = torch.cat(feature_bank, dim=0)
+    feature_labels = torch.cat(labels, dim=0)    
+    # [D, N]
+    
+    
+    
+    feature_dataset = FeatureDataset(feature_bank, feature_labels)
+    feature_dataloader = DataLoader(feature_dataset, batch_size=256, shuffle=True)
+    
+    predictor.train()
+    for epoch in tqdm(range(50), desc='epoch'):
+        for feature, rotated_labels in feature_dataloader:
+            
+            feature = feature.to(device)
+            rotated_labels = rotated_labels.to(device)
+            
+            logits = predictor(feature)
+            loss = F.cross_entropy(logits, rotated_labels)
+            
+            rot_acc = (logits.argmax(dim=-1) == rotated_labels).sum() / len(rotated_labels)
+            rot_acc = rot_acc.item()
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+        print(f'epoch:{epoch}    acc:{rot_acc}')    
+    
+    return predictor
+
+
+
+def train_rotation_predictor(encoder):
+    
+    data_loader = get_essl_train_loader()
+    
+    predictor = Predictor(num_classes=4, feature_dim=512).to(device)
+    
+    # predictor.load_state_dict(torch.load('params_/rotation_predictor.pt'))
+    # return predictor
+    
+    optimizer = torch.optim.Adam(predictor.parameters(), lr=0.001)
+    
+    encoder.eval()
+    predictor.train()
+    
+    for epoch in tqdm(range(100), desc='epoch'):
+        # generate feature bank
+        for image, _ in tqdm(data_loader, desc='rotation_pred', total=len(data_loader)):
+            
+            with torch.no_grad():
+                rotated_x, rotated_labels = rotate_images(image)
+                rotated_x = rotated_x.to(device, non_blocking=True)
+                rotated_labels = rotated_labels.to(device, non_blocking=True)
+                
+                feature = encoder.enc(rotated_x)
+                feature = F.normalize(feature, dim=1)
+                
+            logits = predictor(feature)
+            loss = F.cross_entropy(logits, rotated_labels)
+            
+            rot_acc = (logits.argmax(dim=-1) == rotated_labels).sum() / len(rotated_labels)
+            rot_acc = rot_acc.item()
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+        print(f'epoch:{epoch}    acc:{rot_acc}')    
+    
+    exit()
+    return predictor
+
+
+
 
 def get_random_p(epoch, init_random_p):
     return 1 - (1 - min(epoch, 40)/40)*init_random_p
@@ -352,14 +464,14 @@ config = {
     'lr':0.03,
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
-    'ppo_iterations':200,
+    'ppo_iterations':1000,
     'ppo_len_trajectory':128,
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
     'max_strength':1,
     
-    'logs':True,
+    'logs':False,
     'model_save_path':model_save_path,
     'seed':seed,
     
@@ -427,10 +539,18 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     
     if ((epoch-1) % 5 == 0):
+        
+        rotation_predictor = train_rotation_predictor(
+            encoder=encoder,
+        )
+        
+        # torch.save(rotation_predictor.state_dict(), f'params_/rotation_predictor.pt')
+        
         decoder, ppo_optimizer = ppo_init(config)
         trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
             encoder=encoder, 
             decoder=decoder,
+            predictor=rotation_predictor,
             optimizer=ppo_optimizer,
             max_strength=max_strength,
             config=config,
@@ -452,11 +572,11 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     #     neptune_run=neptune_run
     # )
 
-    if epoch % 1 == 0:
-        test_acc = knn_evaluation(encoder)
+    # if epoch % 1 == 0:
+    #     test_acc = knn_evaluation(encoder)
     
-    if logs:
-        neptune_run["linear_eval/test_acc"] .append(test_acc)
+    # if logs:
+    #     neptune_run["linear_eval/test_acc"] .append(test_acc)
 
     
     

@@ -88,7 +88,7 @@ def print_sorted_strings_with_counts(input_list, topk):
 # #########################################################################################################################
 
 
-def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size, max_strength, logs, neptune_run):
+def collect_trajectories_with_input(len_trajectory, encoder, decoder, predictor, batch_size, max_strength, logs, neptune_run):
 
     assert len_trajectory % batch_size == 0
 
@@ -156,33 +156,39 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         infoNCE_reward = None
         transformations_strength = None
         
+        predictor.eval()
+        encoder.eval()
         with torch.no_grad():
             _, new_z1 = encoder(new_img1)
             _, new_z2 = encoder(new_img2)
             
-        #     rotated_x1, rotated_labels1 = rotate_images(new_img1)
-        #     rotated_x2, rotated_labels2 = rotate_images(new_img2)
+            rotated_x1, rotated_labels1 = rotate_images(new_img1)
+            rotated_x2, rotated_labels2 = rotate_images(new_img2)
             
-        #     rotated_x, rotated_labels = select_from_rotated_views(
-        #         rotated_x1, rotated_x2,
-        #         rotated_labels1, rotated_labels2
-        #     )            
+            rotated_x, rotated_labels = select_from_rotated_views(
+                rotated_x1, rotated_x2,
+                rotated_labels1, rotated_labels2
+            )            
             
-        #     # print(rotated_labels[:10])
-        #     # plot_images_stacked(rotated_x[:5], rotated_x[5:10])
+            # print(rotated_labels[:10])
+            # plot_images_stacked(rotated_x[:5], rotated_x[5:10])
             
-        #     rotated_x = rotated_x.to(device)
-        #     rotated_labels = rotated_labels.to(device)
+            rotated_x = rotated_x.to(device)
+            rotated_labels = rotated_labels.to(device)
             
-        #     feature = encoder.enc(rotated_x)
-        #     logits = encoder.predictor2(feature)
+            feature = encoder.enc(rotated_x)
+            feature = F.normalize(feature, dim=1)
+            logits = predictor(feature)
             
-        #     rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
-        #     rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
+            rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
+            rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
             
-        #     predicttion = logits.argmax(dim=-1)
-        #     rot_acc = 1. * (predicttion == rotated_labels)
-        #     rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
+            predicttion = logits.argmax(dim=-1)
+            rot_acc = 1. * (predicttion == rotated_labels)
+            rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
+            
+            rotation_reward = rot_acc
+            # print(rot_acc.mean())
                         
             
         new_img1 = new_img1.to('cpu')
@@ -198,7 +204,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         # rotation_reward = 1 - standarize_reward(rot_loss, 0, 1.5)
         # reward = infoNCE_reward + rotation_reward
         # reward=infoNCE_reward
-        reward = similariy_reward_function(new_z1, new_z2)
+        # reward = similariy_reward_function(new_z1, new_z2)
+        reward = - rot_loss
         
         stored_log_p[begin:end] = log_p.detach().cpu()
         stored_actions_index += actions_index
@@ -240,6 +247,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
         if transformations_strength is not None:
             neptune_run["ppo/strength_reward"].append(mean_strength)
 
+    # print('mean_entropy:', mean_entropy)
+    
     return (
             (stored_log_p),
             (stored_actions_index),
@@ -314,7 +323,7 @@ def ppo_update_with_input(trajectory, decoder, optimizer, ppo_batch_size=256, pp
             surr2 = torch.clamp(ratio, 1-0.2, 1+0.2) * advantage            
             actor_loss = - torch.min(surr1, surr2).mean()
 
-            loss = actor_loss
+            loss = actor_loss - 0.0*entropy.mean()
             
             # print(entropy)
             # print('reward:', reward[:5].detach().cpu().numpy().tolist())

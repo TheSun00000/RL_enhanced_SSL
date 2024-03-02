@@ -11,7 +11,19 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device
 
 
-
+class Predictor(nn.Module):
+    def __init__(self, num_classes=4, feature_dim=512):
+        super(Predictor, self).__init__()
+        self.num_classes = num_classes
+        self.feature_dim = feature_dim
+        self.model = nn.Sequential(
+            nn.Linear(feature_dim, feature_dim),
+            nn.ReLU(),
+            nn.Linear(feature_dim, num_classes),
+        )
+    
+    def forward(self, features):
+        return self.model(features)
 
 
 class SimCLR(nn.Module):
@@ -268,7 +280,7 @@ class DecoderNN_1input(nn.Module):
         num_transforms = len(transforms)
         self.num_transforms = num_transforms
         self.num_discrete_magnitude = num_discrete_magnitude
-        self.seq_length = 3
+        self.seq_length = 2
 
         self.transform_embedding = nn.Embedding(num_transforms+1, self.embed_size)
         self.magnitude_embedding = nn.Embedding(num_discrete_magnitude+1, self.embed_size)
@@ -277,8 +289,18 @@ class DecoderNN_1input(nn.Module):
 
         self.rnn = nn.LSTMCell(self.embed_size * self.seq_length * 2 * 2, self.decoder_dim, bias=True)
         
-        self.transform_fc = nn.Linear(self.decoder_dim,num_transforms)
-        self.magnitude_fc = nn.Linear(self.decoder_dim,num_discrete_magnitude)
+        # self.transform_fc = nn.Linear(self.decoder_dim,num_transforms)
+        self.transform_fc = nn.Sequential(
+            nn.Linear(self.decoder_dim,512),
+            nn.ReLU(),
+            nn.Linear(512,num_transforms)
+        )
+        # self.magnitude_fc = nn.Linear(self.decoder_dim,num_discrete_magnitude)
+        self.magnitude_fc = nn.Sequential(
+            nn.Linear(self.decoder_dim,512),
+            nn.ReLU(),
+            nn.Linear(512,num_discrete_magnitude)
+        )
         
         self.device = device
 
@@ -345,6 +367,10 @@ class DecoderNN_1input(nn.Module):
                     h_t=h_t,
                     c_t=c_t,
                 )
+                
+                # print(magnitude_logits[0])
+                # print('-'*50)
+                
                 if old_action is None:
                     transform_action_index = Categorical(logits=transform_logits).sample()
                     magnitude_action_index = Categorical(logits=magnitude_logits).sample()
@@ -359,7 +385,7 @@ class DecoderNN_1input(nn.Module):
                 log_p[:, branch, step] = transform_log_p.squeeze(-1) + magnitude_log_p.squeeze(-1)
                 
                 transform_entropy += Categorical(logits=transform_logits).entropy().mean()
-                magnitude_entropy += Categorical(logits=transform_logits).entropy().mean()
+                magnitude_entropy += Categorical(logits=magnitude_logits).entropy().mean()
                 
                 transform_history = transform_history.clone() 
                 transform_history[range(batch_size), branch, step] = transform_action_index
