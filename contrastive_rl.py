@@ -15,21 +15,15 @@ from utils.datasets import (
     plot_images_stacked,
     select_from_rotated_views
 )
-from utils.datasets2 import (
-    get_essl_memory_loader,
-    get_essl_train_loader,
-    get_essl_test_loader
-)
-from utils.networks import SimCLR, DecoderNN_1input, DecoderNoInput, build_resnet18, build_resnet50
+
+from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50
 from utils.contrastive import InfoNCELoss, top_k_accuracy, knn_evaluation, info_nce_loss, knn_monitor
 from utils.ppo import (
     collect_trajectories_with_input,
-    collect_trajectories_no_input,  
     ppo_update_with_input,
-    ppo_update_no_input,
     print_sorted_strings_with_counts
 )
-from utils.transforms import get_transforms_list, NUM_DISCREATE
+from utils.transforms import get_transforms_list, NUM_DISCREATE, transformations_dict
 from utils.logs import init_neptune, get_model_save_path
 from utils.resnet import resnet18
 
@@ -73,22 +67,12 @@ def ppo_init(config):
 
     if config['ppo_decoder']  == 'with_input':
         decoder = DecoderNN_1input(
-            num_transforms=5,
-            num_discrete_magnitude=NUM_DISCREATE,
-            device=device
-            # embed_size=1024,
-            # encoder_dim=128,
-            # decoder_dim=512,
-            # num_transforms=4,
-            # num_discrete_magnitude=10,
-            # seq_length=4
-        )
-    elif config['ppo_decoder']  == 'no_input':
-        decoder = DecoderNoInput(
-            num_transforms=5,
+            transforms=list(transformations_dict.keys()),
             num_discrete_magnitude=NUM_DISCREATE,
             device=device
         )
+    else:
+        raise NotImplementedError
     
     # decoder.load_state_dict(torch.load('params/params_125/decoder.pt'))
     decoder = decoder.to(device)
@@ -437,35 +421,36 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
     max_strength = config['max_strength']
+    random_p = 0.5
     print(f'EPOCH:{epoch}    P:{random_p}  Strength:{max_strength}')
     
     
     
-    # if ((epoch-1) % 5 == 0):
-    #     decoder, ppo_optimizer = ppo_init(config)
-    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-    #         encoder=encoder, 
-    #         decoder=decoder,
-    #         optimizer=ppo_optimizer,
-    #         max_strength=max_strength,
-    #         config=config,
-    #         neptune_run=neptune_run
-    #     )
+    if ((epoch-1) % 5 == 0):
+        decoder, ppo_optimizer = ppo_init(config)
+        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+            encoder=encoder, 
+            decoder=decoder,
+            optimizer=ppo_optimizer,
+            max_strength=max_strength,
+            config=config,
+            neptune_run=neptune_run
+        )
     
     
     
-    contrastive_round(
-        encoder=encoder,
-        decoder=decoder,
-        max_strength=max_strength,
-        epoch=epoch,
-        config=config,
-        optimizer=simclr_optimizer, 
-        scheduler=simclr_scheduler, 
-        criterion=simclr_criterion, 
-        random_p=random_p,
-        neptune_run=neptune_run
-    )
+    # contrastive_round(
+    #     encoder=encoder,
+    #     decoder=decoder,
+    #     max_strength=max_strength,
+    #     epoch=epoch,
+    #     config=config,
+    #     optimizer=simclr_optimizer, 
+    #     scheduler=simclr_scheduler, 
+    #     criterion=simclr_criterion, 
+    #     random_p=random_p,
+    #     neptune_run=neptune_run
+    # )
 
     if epoch % 1 == 0:
         test_acc = knn_evaluation(encoder)
