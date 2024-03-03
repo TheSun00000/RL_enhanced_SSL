@@ -303,13 +303,6 @@ class DataLoaderWrapper:
         new_x1[x1_ppo_aug_idx] = decoder_x1
         new_x2[x2_ppo_aug_idx] = decoder_x2
         
-        plot_images_stacked(new_x1[:10], new_x2[:10])
-        
-        print(new_x1.min(), new_x2.min())
-        print(new_x1.mean(), new_x2.mean())
-        print(new_x1.max(), new_x2.max())
-        print('-'*50)
-        
         return (new_x1, new_x2)
      
     
