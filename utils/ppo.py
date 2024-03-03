@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 from collections import Counter
+import neptune
 
 
 
@@ -17,6 +18,7 @@ from utils.transforms import (
     NUM_DISCREATE
 )
 from utils.contrastive import InfoNCELoss
+from utils.networks import SimCLR, DecoderNN_1input
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -68,7 +70,13 @@ def print_sorted_strings_with_counts(input_list, topk):
 # #########################################################################################################################
 
 
-def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size, neptune_run):
+def collect_trajectories_with_input(
+        len_trajectory: int,
+        encoder: SimCLR,
+        decoder: DecoderNN_1input,
+        batch_size: int,
+        neptune_run: neptune.Run
+    ):
 
     assert len_trajectory % batch_size == 0
 
@@ -247,7 +255,13 @@ def shuffle_trajectory(trajectory):
     return permuted_trajectory
 
 
-def ppo_update_with_input(trajectory, decoder, optimizer, ppo_batch_size=256, ppo_epochs=4):
+def ppo_update_with_input(
+        trajectory: tuple,
+        decoder: DecoderNN_1input,
+        optimizer: torch.optim.Optimizer,
+        ppo_batch_size:int=256,
+        ppo_epochs:int=4
+    ):
 
 
     for _ in range(ppo_epochs):

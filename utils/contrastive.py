@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 import torchvision
 from torchvision import transforms
 from torch.utils.data import  DataLoader
@@ -12,7 +13,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
 device
 
-def get_negative_mask(batch_size):
+def get_negative_mask(batch_size: int):
     negative_mask = torch.ones((batch_size, 2 * batch_size), dtype=bool)
     for i in range(batch_size):
         negative_mask[i, i] = 0
@@ -24,12 +25,12 @@ def get_negative_mask(batch_size):
 
 
 class InfoNCELoss(nn.Module):
-    def __init__(self, reduction='mean'):
+    def __init__(self, reduction:str='mean'):
         super(InfoNCELoss, self).__init__()
         self.CE = nn.CrossEntropyLoss(reduction=reduction)
 
 
-    def forward(self, z1, z2, temperature):
+    def forward(self, z1: Tensor, z2: Tensor, temperature: float):
         
         batch_size = z1.shape[0]
         
@@ -64,13 +65,13 @@ class InfoNCELoss(nn.Module):
 
 
 class InfoNCELoss_(nn.Module):
-    def __init__(self, reduction='mean'):
+    def __init__(self, reduction:str='mean'):
         super(InfoNCELoss_, self).__init__()
         self.reduction = reduction
         self.CE = nn.CrossEntropyLoss(reduction=reduction)
 
 
-    def forward(self, z1, z2, temperature):
+    def forward(self, z1:Tensor, z2:Tensor, temperature:float):
         
         batch_size = z1.shape[0]
         
@@ -100,7 +101,7 @@ class InfoNCELoss_(nn.Module):
         return sim, None, loss
     
 
-def info_nce_loss(z1, z2, temperature=0.5, reduction='mean'):
+def info_nce_loss(z1:Tensor, z2:Tensor, temperature:float=0.5, reduction='mean'):
     z1 = torch.nn.functional.normalize(z1, dim=1)
     z2 = torch.nn.functional.normalize(z2, dim=1)
 
@@ -117,7 +118,7 @@ class InfoNCELoss_(nn.Module):
         self.reduction = reduction
         self.CE = nn.CrossEntropyLoss(reduction=reduction)
         
-    def forward(self, z1, z2, temperature):
+    def forward(self, z1:Tensor, z2:Tensor, temperature:float):
         loss = info_nce_loss(z1, z2, temperature, self.reduction) / 2 + info_nce_loss(z2, z1, temperature, self.reduction) / 2
         return None, None, loss
 
@@ -134,14 +135,6 @@ class FeaturesDataset:
             x = self.x[i]
             y = self.y[i]
             return x, y
-    
-class LinearClassifier(nn.Module):
-    def __init__(self, input_size, num_classes):
-        super(LinearClassifier, self).__init__()
-        self.fc = nn.Linear(input_size, num_classes)
-
-    def forward(self, x):
-        return self.fc(x)
 
 
 

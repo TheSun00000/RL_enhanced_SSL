@@ -1,4 +1,5 @@
 import torch
+from torch.utils.data import DataLoader, Dataset
 import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
@@ -53,7 +54,7 @@ def cuda_memory_usage():
 
 
 
-def ppo_init(config):
+def ppo_init(config: dict):
 
     # encoder = build_resnet18()
     # encoder.load_state_dict(torch.load('params/resnet18_contrastive_only_colorjitter.pt'))
@@ -84,7 +85,7 @@ def ppo_init(config):
     return decoder, optimizer
 
 
-def contrastive_init(config):
+def contrastive_init(config: dict):
     
     if config['encoder_backbone'] == 'resnet18':
         encoder = build_resnet18()
@@ -113,7 +114,14 @@ def contrastive_init(config):
     return encoder, optimizer, criterion
 
 
-def adjust_learning_rate(epochs, warmup_epochs, base_lr, optimizer, loader, step):
+def adjust_learning_rate(
+        epochs: int,
+        warmup_epochs: int,
+        base_lr: float,
+        optimizer: torch.optim.Optimizer,
+        loader: DataLoader,
+        step: int
+    ):
     max_steps = epochs * len(loader)
     warmup_steps = warmup_epochs * len(loader)
     if step < warmup_steps:
@@ -129,7 +137,7 @@ def adjust_learning_rate(epochs, warmup_epochs, base_lr, optimizer, loader, step
     return lr
 
 
-def init(config):
+def init(config: dict):
     
     encoder, simclr_optimizer, simclr_criterion = contrastive_init(config)
     decoder, ppo_optimizer = ppo_init(config)
@@ -140,7 +148,13 @@ def init(config):
     )
     
         
-def ppo_round(encoder, decoder, optimizer, config, neptune_run):
+def ppo_round(
+        encoder: SimCLR,
+        decoder: DecoderNN_1input,
+        optimizer: torch.optim.Optimizer,
+        config: dict,
+        neptune_run: neptune.Run
+    ):
     
     ppo_rounds = config['ppo_iterations']
     len_trajectory = config['ppo_len_trajectory'] 
@@ -198,13 +212,13 @@ def ppo_round(encoder, decoder, optimizer, config, neptune_run):
 
 def contrastive_round(
         encoder: SimCLR,
-        decoder,
-        optimizer,
-        criterion,
-        random_p,
-        config,
-        epoch,
-        neptune_run
+        decoder: DecoderNN_1input,
+        optimizer: torch.optim.Optimizer,
+        criterion: torch.nn.Module,
+        random_p: float,
+        config: dict,
+        epoch: int,
+        neptune_run: neptune.Run
     ):
     
     num_steps = config['simclr_iterations'] 
@@ -280,10 +294,6 @@ def contrastive_round(
         if config['rotation']:
             neptune_run["simclr/rot_loss"].append(rot_loss.item())
             neptune_run["simclr/rot_acc"].append(rot_acc.item())
-
-
-def get_random_p(epoch, init_random_p):
-    return 1 - (1 - min(epoch, 40)/40)*init_random_p
 
 
 config = {

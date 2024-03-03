@@ -252,7 +252,7 @@ class DataLoaderWrapper:
           
 
 
-def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, random_p=0, spatial_only=False):
+def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, random_p=0.0, spatial_only=False):
         
     dataset = MyDatset(cifar10_dataset)
     data_loader = DataLoader(dataset, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=MyDatset_collate_fn)
