@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import LambdaLR
 import numpy as np
 from tqdm import tqdm
 from neptune.types import File
@@ -21,7 +20,7 @@ from utils.datasets2 import (
     get_essl_train_loader,
     get_essl_memory_loader
 )
-from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50, Predictor
+from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50
 from utils.contrastive import InfoNCELoss, knn_evaluation, top_k_accuracy
 from utils.ppo import (
     collect_trajectories_with_input,
@@ -32,8 +31,8 @@ from utils.transforms import get_transforms_list, NUM_DISCREATE, transformations
 from utils.logs import init_neptune, get_model_save_path
 from utils.resnet import resnet18
 
-seed = random.randint(0, 100000)
-# seed = 0
+# seed = random.randint(0, 100000)
+seed = 0
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)  # if you are using multiple GPUs
@@ -87,10 +86,10 @@ def ppo_init(config):
         lr=0.00005
     )
     
-    # if config['checkpoint_params']:
-    #     checkpoint_params = config['checkpoint_params']
-    #     decoder.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder.pt'))
-    #     optimizer.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder_opt.pt'))
+    if config['checkpoint_params']:
+        checkpoint_params = config['checkpoint_params']
+        decoder.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder.pt'))
+        optimizer.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder_opt.pt'))
 
     return decoder, optimizer
 
@@ -107,19 +106,6 @@ def contrastive_init(config):
     encoder = encoder.to(device)
 
     criterion = InfoNCELoss()
-
-    # # # # # # # optimizer = torch.optim.SGD(
-    # # # # # # #     encoder.parameters(),
-    # # # # # # #     lr=0.01,
-    # # # # # # #     momentum=0.9,
-    # # # # # # #     weight_decay=1e-6,
-    # # # # # # #     nesterov=True)
-    
-    # optimizer = torch.optim.Adam(
-    #     encoder.parameters(),
-    #     lr=0.001,
-    #     weight_decay=1e-6,
-    # )
     
     optimizer = torch.optim.SGD(
         encoder.parameters(),
@@ -128,26 +114,13 @@ def contrastive_init(config):
         weight_decay=0.0005
     )
 
-
-    def get_lr(step, total_steps, lr_max, lr_min):
-        return lr_min + (lr_max - lr_min) * 0.5 * (1 + np.cos(step / total_steps * np.pi))
-
-    scheduler = LambdaLR(
-        optimizer,
-        lr_lambda=lambda step: get_lr(  # pylint: disable=g-long-lambda
-            step,
-            100 * 50000 // 512,
-            0.6,  # lr_lambda computes multiplicative factor
-            1e-3
-        )
-    )
     
     if config['checkpoint_params']:
         checkpoint_params = config['checkpoint_params']
         encoder.load_state_dict(torch.load(f'params/{checkpoint_params}/encoder.pt'))
         optimizer.load_state_dict(torch.load(f'params/{checkpoint_params}/encoder_opt.pt'))
     
-    return encoder, optimizer, scheduler, criterion
+    return encoder, optimizer, criterion
 
 
 def adjust_learning_rate(epochs, warmup_epochs, base_lr, optimizer, loader, step):
@@ -168,16 +141,16 @@ def adjust_learning_rate(epochs, warmup_epochs, base_lr, optimizer, loader, step
 
 def init(config):
     
-    encoder, simclr_optimizer, simclr_scheduler, simclr_criterion = contrastive_init(config)
+    encoder, simclr_optimizer, simclr_criterion = contrastive_init(config)
     decoder, ppo_optimizer = ppo_init(config)
     
     return (
-        (encoder, simclr_optimizer, simclr_scheduler, simclr_criterion),
+        (encoder, simclr_optimizer, simclr_criterion),
         (decoder, ppo_optimizer) 
     )
     
         
-def ppo_round(encoder, decoder, predictor, optimizer, max_strength, config, neptune_run):
+def ppo_round(encoder, decoder, optimizer, config, neptune_run):
     
     ppo_rounds = config['ppo_iterations']
     len_trajectory = config['ppo_len_trajectory'] 
@@ -203,9 +176,7 @@ def ppo_round(encoder, decoder, predictor, optimizer, max_strength, config, nept
             len_trajectory=len_trajectory,
             encoder=encoder,
             decoder=decoder,
-            predictor=predictor,
             batch_size=batch_size,
-            max_strength=max_strength,
             logs=logs,
             neptune_run=neptune_run
         )
@@ -220,9 +191,7 @@ def ppo_round(encoder, decoder, predictor, optimizer, max_strength, config, nept
         
         losses.append(loss)
         rewards.append(float(trajectory[-1].mean()))
-        
-        # tqdm_range.set_description(f'[ppo_round] Reward: {rewards[-1]:.4f}')
-        
+                
     stored_actions_index = trajectory[2]
     transforms_list_1, transforms_list_2 = get_transforms_list(
         stored_actions_index,
@@ -335,7 +304,7 @@ config = {
     'warmup_epochs':10,
 
     'simclr_iterations':'all',
-    'simclr_bs':512,
+    'simclr_bs':16,
     'linear_eval_epochs':200,
     'random_p':0.75,
     'encoder_backbone': 'resnet18', # ['resnet18', 'resnet50']
@@ -349,9 +318,8 @@ config = {
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
-    'max_strength':1,
     
-    'logs':True,
+    'logs':False,
     'model_save_path':model_save_path,
     'seed':seed,
     
@@ -364,7 +332,7 @@ config = {
 
 
 (
-    (encoder, simclr_optimizer, simclr_scheduler, simclr_criterion),
+    (encoder, simclr_optimizer, simclr_criterion),
     (decoder, ppo_optimizer) 
 ) = init(config)
 
@@ -412,26 +380,21 @@ if config['checkpoint_params']:
 for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     # random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
-    # max_strength = config['max_strength']
     random_p = config['random_p']
     print(f'EPOCH:{epoch}    P:{random_p}')
     
     
     
-    # if ((epoch-1) % 5 == 0):
-        
-    #     # torch.save(rotation_predictor.state_dict(), f'params_/rotation_predictor.pt')
-        
-    #     decoder, ppo_optimizer = ppo_init(config)
-    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-    #         encoder=encoder, 
-    #         decoder=decoder,
-    #         predictor=rotation_predictor,
-    #         optimizer=ppo_optimizer,
-    #         max_strength=max_strength,
-    #         config=config,
-    #         neptune_run=neptune_run
-    #     )
+    if ((epoch-1) % 5 == 0):
+                
+        decoder, ppo_optimizer = ppo_init(config)
+        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+            encoder=encoder, 
+            decoder=decoder,
+            optimizer=ppo_optimizer,
+            config=config,
+            neptune_run=neptune_run
+        )
     
     
     
@@ -458,7 +421,6 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
     torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
-    torch.save(simclr_scheduler.state_dict(), f'{model_save_path}/encoder_shd.pt')
     torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
     torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
     
@@ -466,7 +428,6 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     if logs:
         neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
         neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
-        neptune_run["params/encoder_shd"].upload(f'{model_save_path}/encoder_shd.pt')
         neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
         neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
 

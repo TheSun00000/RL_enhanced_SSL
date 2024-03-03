@@ -7,7 +7,6 @@ import random
 import PIL
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# device = 'cpu'
 device
 
 NUM_DISCREATE = 10
@@ -209,10 +208,9 @@ def get_autoaugment_transforms(num_samples):
 
 
 
-def apply_transformations(img1, transform_list, max_strength):
+def apply_transformations(img1, transform_list):
         
     num_samples = len(img1)
-    # stored_imgs = torch.zeros((num_samples, 3, 32, 32))
     stored_imgs = []
     
     for i in range(num_samples):

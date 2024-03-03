@@ -10,10 +10,7 @@ from utils.transforms import (
     get_autoaugment_transforms
 )
 
-# import cv2
-
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# device = 'cpu'
 device
 
 
@@ -59,10 +56,6 @@ def plot_images_stacked(tensor1, tensor2):
 
     plt.show()
 
-
-# Example usage
-# Assuming you have a tensor named 'image_tensor'
-# plot_images(image_tensor)
 
 def rotate_images(images):
     nimages = images.shape[0]
@@ -137,16 +130,14 @@ def MyDatset_collate_fn(imgs_y):
 
 
 class DataLoaderWrapper:
-    def __init__(self, dataloder, steps, encoder, decoder, max_strength, random_p, spatial_only):
+    def __init__(self, dataloder, steps, encoder, decoder, random_p, spatial_only):
         self.dataloder = dataloder
         self.steps = steps
         self.encoder = encoder
         self.decoder = decoder
         self.random_p = random_p
         self.spatial_only = spatial_only
-        
-        self.max_strength = max_strength
-        
+                
         self.color_transformation = transforms.Compose([
             transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
             transforms.RandomGrayscale(p=0.2),
@@ -161,76 +152,7 @@ class DataLoaderWrapper:
             transforms.ToTensor(),
             transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
         ])
-    
-    
-    def decoder_transform___(self, x):
 
-        batch_size = x.shape[0]
-        num_random_samples = int(batch_size*self.random_p)
-        num_decoder_samples = batch_size - num_random_samples
-        
-        
-        if self.spatial_only:
-            # x1 = torch.stack([self.random_spatial_transformation(tensor) for tensor in x1])
-            # x2 = torch.stack([self.random_spatial_transformation(tensor) for tensor in x2])
-            # return x1, x2
-            return x
-        
-        random_x, decoder_x = x[:num_random_samples], x[num_random_samples:]
-        
-        random_x1 = random_x
-        random_x2 = random_x
-        decoder_x1 = decoder_x
-        decoder_x2 = decoder_x
-        
-        if num_random_samples != 0:
-            random_x1 = torch.stack([self.random_transformation(tensor) for tensor in random_x])
-            random_x2 = torch.stack([self.random_transformation(tensor) for tensor in random_x])
-
-
-        if (num_decoder_samples != 0):
-            
-            if isinstance(self.decoder, DecoderNN_1input):
-                normalized_decoder_x = torch.stack([self.normalization(tensor) for tensor in decoder_x])
-                normalized_decoder_x = normalized_decoder_x.to(device)
-                with torch.no_grad():
-                    _, z = self.encoder(normalized_decoder_x)
-                    (_, actions_index, _) = self.decoder(z)
-                num_discrete_magnitude = self.decoder.num_discrete_magnitude
-                transforms_list_1, transforms_list_2 = get_transforms_list(
-                    actions_index,
-                    num_magnitudes=num_discrete_magnitude
-                )
-                    
-            elif isinstance(self.decoder, DecoderNoInput):
-                with torch.no_grad():
-                    (_, (transform_actions_index, magnitude_actions_index), _) = self.decoder(num_decoder_samples)
-                num_discrete_magnitude = self.decoder.num_discrete_magnitude
-                transforms_list_1, transforms_list_2 = get_transforms_list(
-                    transform_actions_index, 
-                    magnitude_actions_index,
-                    num_magnitudes=num_discrete_magnitude)
-            
-            decoder_x1 = apply_transformations(decoder_x1, transforms_list_1, self.max_strength)
-            decoder_x2 = apply_transformations(decoder_x2, transforms_list_2, self.max_strength)
-
-            decoder_x1 = torch.stack([self.normalization(tensor) for tensor in decoder_x1])
-            decoder_x2 = torch.stack([self.normalization(tensor) for tensor in decoder_x2])
-        
-
-        # print(random_x1.min(), random_x1.max())
-        # print(random_x2.min(), random_x2.max())
-        # print(decoder_x1.min(), decoder_x1.max())
-        # print(decoder_x2.min(), decoder_x2.max())
-        
-        new_x1 = torch.cat((random_x1, decoder_x1))
-        new_x2 = torch.cat((random_x2, decoder_x2))
-                
-        # plot_images_stacked(decoder_x1[:10], decoder_x2[:10])
-              
-        return (new_x1, new_x2)
-        
-    
     
     def decoder_transform(self, x):
 
@@ -275,11 +197,8 @@ class DataLoaderWrapper:
             transforms_list_1 = get_autoaugment_transforms(num_samples=len(decoder_x1))
             transforms_list_2 = get_autoaugment_transforms(num_samples=len(decoder_x2))
                         
-            decoder_x1 = apply_transformations(decoder_x1, transforms_list_1, self.max_strength)
-            decoder_x2 = apply_transformations(decoder_x2, transforms_list_2, self.max_strength)
-            # decoder_x1 = torch.stack([self.normalization(tensor) for tensor in decoder_x1]) if len(decoder_x1) else decoder_x1
-            # decoder_x2 = torch.stack([self.normalization(tensor) for tensor in decoder_x2]) if len(decoder_x2) else decoder_x2
-        
+            decoder_x1 = apply_transformations(decoder_x1, transforms_list_1)
+            decoder_x2 = apply_transformations(decoder_x2, transforms_list_2)
         
         
         new_x1 = torch.zeros((batch_size, 3, 32, 32), dtype=torch.float32)
@@ -333,7 +252,7 @@ class DataLoaderWrapper:
           
 
 
-def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, max_strength=0.5, random_p=0, spatial_only=False):
+def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, random_p=0, spatial_only=False):
         
     dataset = MyDatset(cifar10_dataset)
     data_loader = DataLoader(dataset, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=MyDatset_collate_fn)
@@ -342,7 +261,6 @@ def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, ma
         num_steps,
         encoder=encoder,
         decoder=decoder,
-        max_strength=max_strength,
         random_p=random_p,
         spatial_only=spatial_only
     )

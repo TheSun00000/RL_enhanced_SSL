@@ -2,32 +2,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
-# from torchvision.models import resnet18, resnet50
 from utils.resnet import resnet18, resnet50
 from itertools import permutations
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# device = 'cpu'
 device
 
 
-class Predictor(nn.Module):
-    def __init__(self, num_classes=4, feature_dim=512):
-        super(Predictor, self).__init__()
-        self.num_classes = num_classes
-        self.feature_dim = feature_dim
-        self.model = nn.Sequential(
-            nn.Linear(feature_dim, feature_dim),
-            nn.ReLU(),
-            nn.Linear(feature_dim, num_classes),
-        )
-    
-    def forward(self, features):
-        return self.model(features)
-
 
 class SimCLR(nn.Module):
-    def __init__(self, backbone, projection_dim=128):
+    def __init__(self, backbone):
         super(SimCLR, self).__init__()
         if backbone == 'resnet18':
             self.enc = resnet18()
@@ -374,8 +358,6 @@ class DecoderNN_1input(nn.Module):
                     c_t=c_t,
                 )
                 
-                # print(magnitude_logits[0])
-                # print('-'*50)
                 
                 if old_action is None:
                     transform_action_index = Categorical(logits=transform_logits).sample()
@@ -416,9 +398,7 @@ class DecoderNN_1input(nn.Module):
             action[-1].append([])
             for b in range(2):
                 for s in range(self.seq_length):
-                    level = (magnitude_history[i, b, s] / self.num_discrete_magnitude).item()
-                    # level = magnitude_history[i, b, s].item()
-                    
+                    level = (magnitude_history[i, b, s] / self.num_discrete_magnitude).item()                    
                     action[-1][b].append((
                         self.transforms[transform_history[i, b, s]],
                         0.8,

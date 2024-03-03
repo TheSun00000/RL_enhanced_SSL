@@ -20,10 +20,7 @@ from utils.contrastive import InfoNCELoss
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# device = 'cpu'
 device
-
-# random_grayscale = transforms.RandomGrayscale(p=1)
 
 infonce_reward = InfoNCELoss(reduction='none')
 
@@ -39,23 +36,6 @@ def infonce_reward_function(new_z1, new_z2):
     full_similarity_matrix, logits, loss = infonce_reward(new_z1, new_z2, temperature=0.5)
     reward = loss
     return reward
-
-def test_reward_function(y, magnitude_actions_index):
-    # print(y.shape, magnitude_actions_index.shape)
-    
-    reward = (y.reshape(-1,1,1).to(device) == magnitude_actions_index)
-    reward = reward.reshape(y.shape[0], -1)
-    reward = reward.sum(dim=-1)
-
-    return reward * 1.
-
-
-def distance_between_positions(position1, position2):
-    ax, ay = position1 // 3, position1 % 3
-    bx, by = position2 // 3, position2 % 3
-    distance = ((ax-bx)**2 + (ay-by)**2)**0.5
-    # 2.8284 is the max distance ( the diagonal )
-    return distance / 2.8284
 
 
 def get_transformations_strength(actions):
@@ -88,7 +68,7 @@ def print_sorted_strings_with_counts(input_list, topk):
 # #########################################################################################################################
 
 
-def collect_trajectories_with_input(len_trajectory, encoder, decoder, predictor, batch_size, max_strength, logs, neptune_run):
+def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size, logs, neptune_run):
 
     assert len_trajectory % batch_size == 0
 
@@ -106,9 +86,6 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, predictor,
             transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
         ])
 
-    # encoder_dim = encoder.projector[3].out_features
-    encoder_dim = 2048
-
 
     stored_log_p = torch.zeros((len_trajectory, 1))
     stored_actions_index = []
@@ -123,7 +100,6 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, predictor,
     
     data_loader_iterator = iter(data_loader)
     for i in range(len_trajectory // batch_size):
-#     for i in tqdm(range(len_trajectory // batch_size), desc='collect_trajectories'):
 
         begin, end = i*batch_size, (i+1)*batch_size
 
@@ -142,8 +118,8 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, predictor,
             num_magnitudes=num_discrete_magnitude)
         
 
-        new_img1 = apply_transformations(img, transforms_list_1, max_strength)
-        new_img2 = apply_transformations(img, transforms_list_2, max_strength)
+        new_img1 = apply_transformations(img, transforms_list_1)
+        new_img2 = apply_transformations(img, transforms_list_2)
 
         new_img1 = torch.stack([last_transform(img) for img in new_img1])
         new_img2 = torch.stack([last_transform(img) for img in new_img2])
@@ -156,7 +132,6 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, predictor,
         infoNCE_reward = None
         transformations_strength = None
         
-        predictor.eval()
         encoder.eval()
         with torch.no_grad():
             _, new_z1 = encoder(new_img1)
@@ -170,15 +145,12 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, predictor,
                 rotated_labels1, rotated_labels2
             )            
             
-            # print(rotated_labels[:10])
-            # plot_images_stacked(rotated_x[:5], rotated_x[5:10])
-            
             rotated_x = rotated_x.to(device)
             rotated_labels = rotated_labels.to(device)
             
             feature = encoder.enc(rotated_x)
             feature = F.normalize(feature, dim=1)
-            logits = predictor(feature)
+            logits = encoder.predictor(feature)
             
             rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
             rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
@@ -188,7 +160,6 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, predictor,
             rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
             
             rotation_reward = rot_acc
-            # print(rot_acc.mean())
                         
             
         new_img1 = new_img1.to('cpu')
@@ -228,9 +199,7 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, predictor,
         s2 = ' '.join([ f'{name[:4]}_{round(level, 3)}' for (name, _, level) in trans2])
         string_transforms.append( f'{s1}  ||  {s2}' )
     print_sorted_strings_with_counts(string_transforms, topk=5)
-    
-    # plot_images_stacked(new_img1[:10], new_img2[:10])
-    
+        
     mean_rewards /= (len_trajectory // batch_size)
     mean_rot_reward /= (len_trajectory // batch_size)
     mean_infonce_reward /= (len_trajectory // batch_size)
