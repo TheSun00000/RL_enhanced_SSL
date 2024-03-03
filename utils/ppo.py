@@ -68,7 +68,7 @@ def print_sorted_strings_with_counts(input_list, topk):
 # #########################################################################################################################
 
 
-def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size, logs, neptune_run):
+def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size, neptune_run):
 
     assert len_trajectory % batch_size == 0
 
@@ -206,15 +206,14 @@ def collect_trajectories_with_input(len_trajectory, encoder, decoder, batch_size
     mean_strength /= (len_trajectory // batch_size)
     mean_entropy /= (len_trajectory // batch_size)
     
-    if logs:
-        neptune_run["ppo/reward"].append(mean_rewards)
-        neptune_run["ppo/mean_entropy"].append(mean_entropy)
-        if rotation_reward is not None:
-            neptune_run["ppo/rot_reward"].append(mean_rot_reward)
-        if infoNCE_reward is not None:
-            neptune_run["ppo/infonce_reward"].append(mean_infonce_reward)
-        if transformations_strength is not None:
-            neptune_run["ppo/strength_reward"].append(mean_strength)
+    neptune_run["ppo/reward"].append(mean_rewards)
+    neptune_run["ppo/mean_entropy"].append(mean_entropy)
+    if rotation_reward is not None:
+        neptune_run["ppo/rot_reward"].append(mean_rot_reward)
+    if infoNCE_reward is not None:
+        neptune_run["ppo/infonce_reward"].append(mean_infonce_reward)
+    if transformations_strength is not None:
+        neptune_run["ppo/strength_reward"].append(mean_strength)
 
     # print('mean_entropy:', mean_entropy)
     

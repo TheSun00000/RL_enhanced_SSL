@@ -1,10 +1,7 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
-from neptune.types import File
 import random
 import math
 import neptune
@@ -12,13 +9,7 @@ import neptune
 from utils.datasets import (
     get_cifar10_dataloader, 
     rotate_images, 
-    plot_images_stacked,
     select_from_rotated_views,
-    FeatureDataset
-)
-from utils.datasets2 import (
-    get_essl_train_loader,
-    get_essl_memory_loader
 )
 from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50
 from utils.contrastive import InfoNCELoss, knn_evaluation, top_k_accuracy
@@ -29,7 +20,6 @@ from utils.ppo import (
 )
 from utils.transforms import get_transforms_list, NUM_DISCREATE, transformations_dict
 from utils.logs import init_neptune, get_model_save_path
-from utils.resnet import resnet18
 
 # seed = random.randint(0, 100000)
 seed = 0
@@ -157,7 +147,6 @@ def ppo_round(encoder, decoder, optimizer, config, neptune_run):
     batch_size = config['ppo_collection_bs'] 
     ppo_epochs = config['ppo_update_epochs'] 
     ppo_batch_size = config['ppo_update_bs']
-    logs = config['logs']
     
     if config['ppo_decoder'] == 'with_input':
         collect_trajectories = collect_trajectories_with_input
@@ -177,7 +166,6 @@ def ppo_round(encoder, decoder, optimizer, config, neptune_run):
             encoder=encoder,
             decoder=decoder,
             batch_size=batch_size,
-            logs=logs,
             neptune_run=neptune_run
         )
 
@@ -221,7 +209,6 @@ def contrastive_round(
     
     num_steps = config['simclr_iterations'] 
     batch_size = config['simclr_bs']
-    logs = config['logs']
     
     train_loader = get_cifar10_dataloader(
         num_steps=num_steps, 
@@ -286,13 +273,13 @@ def contrastive_round(
             rot_loss.backward()
         optimizer.step()
 
-        if logs:
-            neptune_run["simclr/loss"].append(simclr_loss.item())
-            neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
-            neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
-            if config['rotation']:
-                neptune_run["simclr/rot_loss"].append(rot_loss.item())
-                neptune_run["simclr/rot_acc"].append(rot_acc.item())
+        # logs:
+        neptune_run["simclr/loss"].append(simclr_loss.item())
+        neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
+        neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
+        if config['rotation']:
+            neptune_run["simclr/rot_loss"].append(rot_loss.item())
+            neptune_run["simclr/rot_acc"].append(rot_acc.item())
 
 
 def get_random_p(epoch, init_random_p):
@@ -313,13 +300,13 @@ config = {
     'rotation':False,
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
-    'ppo_iterations':1000,
+    'ppo_iterations':200,
     'ppo_len_trajectory':128,
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
     
-    'logs':False,
+    'mode':'async', # ['async', 'debug']
     'model_save_path':model_save_path,
     'seed':seed,
     
@@ -338,12 +325,12 @@ config = {
 
 
 
-logs = config['logs']
-logs_keys = ['random_p', 'ppo_iterations', 'model_save_path']
-neptune_run = init_neptune(['contrastive_rl'] + [f'{k}={config[k]}' for (k) in logs_keys]) if logs else None
-
-if logs:
-    neptune_run["scripts"].upload_files(["./utils/*.py", "./*.py"])
+logs_tags = ['random_p', 'ppo_iterations', 'model_save_path']
+neptune_run = init_neptune(
+    tags=[f'{k}={config[k]}' for (k) in logs_tags],
+    mode=config['mode']
+)
+neptune_run["scripts"].upload_files(["./utils/*.py", "./*.py"])
 
 stop_ppo = False
 
@@ -363,8 +350,7 @@ if config['checkpoint_params']:
     test_acc = prev_run['linear_eval/test_acc'].fetch_values().value.tolist()
     start_epoch = len(test_acc) + 1
     
-    if logs:
-        
+    if config['mode']:
         for acc in test_acc:
             neptune_run["linear_eval/test_acc"].append(acc)
             
@@ -412,8 +398,7 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     if epoch % 1 == 0:
         test_acc = knn_evaluation(encoder)
     
-    if logs:
-        neptune_run["linear_eval/test_acc"] .append(test_acc)
+    neptune_run["linear_eval/test_acc"] .append(test_acc)
 
     
     
@@ -424,14 +409,11 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
     torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
     
-    
-    if logs:
-        neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
-        neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
-        neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
-        neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
+    neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
+    neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
+    neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
+    neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
 
     
 
-if logs:
-    neptune_run.stop()
+neptune_run.stop()

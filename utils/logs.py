@@ -1,11 +1,12 @@
 import os
 import neptune
 
-def init_neptune(tags=[]):
+def init_neptune(tags=[], mode='async'):
     run = neptune.init_run(
         project="nazim-bendib/simclr-rl",
         api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIxNDVjNWJkYi1mMTIwLTRmNDItODk3Mi03NTZiNzIzZGNhYzMifQ==",
-        tags=tags 
+        tags=tags,
+        mode=mode
     )
     
     return run
