@@ -339,5 +339,4 @@ def eval_loop(encoder, ind=None):
             )
             print(line_to_print)
 
-    accuracy = 90.
     return accuracy

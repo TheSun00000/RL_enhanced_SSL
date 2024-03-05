@@ -306,7 +306,7 @@ config = {
     'simclr_iterations':'all',
     'simclr_bs':512,
     'linear_eval_epochs':200,
-    'random_p':0.5,
+    'random_p':0.0,
     'encoder_backbone': 'resnet18', # ['resnet18', 'resnet50']
     'lmbd': 0.0,
     'lr':0.03,
@@ -380,22 +380,22 @@ if config['checkpoint_params']:
 
 for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
-    random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
+    # random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
     random_p = config['random_p']
     print(f'EPOCH:{epoch}    P:{random_p}')
     
     
     
-    if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
+    # if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
                 
-        decoder, ppo_optimizer = ppo_init(config)
-        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-            encoder=encoder, 
-            decoder=decoder,
-            optimizer=ppo_optimizer,
-            config=config,
-            neptune_run=neptune_run
-        )
+    #     decoder, ppo_optimizer = ppo_init(config)
+    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+    #         encoder=encoder, 
+    #         decoder=decoder,
+    #         optimizer=ppo_optimizer,
+    #         config=config,
+    #         neptune_run=neptune_run
+    #     )
     
     
     
