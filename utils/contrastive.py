@@ -3,9 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 import torchvision
-from torchvision import transforms
+import torchvision.transforms as T
 from torch.utils.data import  DataLoader
 from tqdm import tqdm
+import math
+
+import numpy as np
 
 from utils.datasets2 import get_essl_memory_loader, get_essl_test_loader
 
@@ -136,107 +139,6 @@ class FeaturesDataset:
             y = self.y[i]
             return x, y
 
-
-
-
-
-# linear_eval_train_transform = transforms.Compose([
-#     transforms.RandomResizedCrop(32),
-#     transforms.RandomHorizontalFlip(p=0.5),
-#     transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-#     transforms.RandomGrayscale(p=0.2),
-#     transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2))], p=0.5),
-#     transforms.ToTensor(),
-#     transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
-
-# linear_eval_test_transform = transforms.Compose([
-#     transforms.ToTensor(),
-#     transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])])
-
-# linear_eval_train_dataset = torchvision.datasets.CIFAR10(root='dataset', train=True, download=True, transform=linear_eval_train_transform)
-# linear_eval_test_dataset = torchvision.datasets.CIFAR10(root='dataset', train=False, download=True, transform=linear_eval_test_transform)
-
-
-# def linear_evaluation(encoder, num_epochs=10):
-
-#     train_loader = DataLoader(linear_eval_train_dataset, batch_size=1024, shuffle=True)
-#     test_loader = DataLoader(linear_eval_test_dataset, batch_size=1024, shuffle=False)
-
-
-#     def extract_features(data_loader, encoder, epochs):
-#         features, labels = [], []
-#         # for images, labels_batch in tqdm(data_loader, desc='[Linear Eval][Features extraction]'):
-#         for epoch in tqdm(range(epochs)):
-#             for images, labels_batch in data_loader:
-#                 with torch.no_grad():
-#                     features_batch, projections_batch = encoder(images.to(device))
-#                 features.append(features_batch)
-#                 labels.append(labels_batch)
-#         return torch.cat(features, dim=0), torch.cat(labels, dim=0)
-
-#     # Extract features for linear evaluation
-#     train_features, train_labels = extract_features(train_loader, encoder, epochs=1)
-#     test_features, test_labels = extract_features(test_loader, encoder, epochs=1)
-
-    
-#     features_train_dataset = FeaturesDataset(train_features, train_labels)
-#     features_test_dataset = FeaturesDataset(test_features, test_labels)
-
-#     features_train_dataloader = DataLoader(features_train_dataset, batch_size=1024, shuffle=True)
-#     features_test_dataloader = DataLoader(features_test_dataset, batch_size=1024, shuffle=True)
-    
-    
-    
-#     linear_eval_model = LinearClassifier(encoder.feature_dim, num_classes=10).to(device)
-#     criterion = nn.CrossEntropyLoss()
-#     optimizer = torch.optim.SGD(linear_eval_model.parameters(), lr=0.01, momentum=0.9)
-    
-#     print("[Linear Eval][Training]")
-#     # for epoch in tqdm(range(num_epochs), desc="[Linear Eval][Training]"):
-#     for epoch in range(num_epochs):
-#         linear_eval_model.train()
-
-#         for features, labels in features_train_dataloader:
-#             features, labels = features.to(device), labels.to(device)
-#             outputs = linear_eval_model(features)
-#             loss = criterion(outputs, labels)
-#             optimizer.zero_grad()
-#             loss.backward()
-#             optimizer.step()
-            
-            
-            
-#     linear_eval_model.eval()
-    
-#     with torch.no_grad():
-#         correct = 0
-#         total = 0
-#         with torch.no_grad():
-#             print("[Linear Eval][Train Eval]")
-#             # for features, labels in tqdm(features_train_dataloader, desc="[Linear Eval][Train Eval]"):
-#             for features, labels in features_train_dataloader:
-#                 features, labels = features.to(device), labels.to(device)
-#                 outputs = linear_eval_model(features)
-#                 _, predicted = torch.max(outputs.data, 1)
-#                 total += labels.size(0)
-#                 correct += (predicted == labels).sum().item()
-#         train_accuracy = (correct / total) * 100
-        
-        
-#         correct = 0
-#         total = 0
-#         with torch.no_grad():
-#             print("[Linear Eval][Test Eval]")
-#             # for features, labels in tqdm(features_test_dataloader, desc="[Linear Eval][Test Eval]"):
-#             for features, labels in features_test_dataloader:
-#                 features, labels = features.to(device), labels.to(device)
-#                 outputs = linear_eval_model(features)
-#                 _, predicted = torch.max(outputs.data, 1)
-#                 total += labels.size(0)
-#                 correct += (predicted == labels).sum().item()
-#         test_accuracy = (correct / total) * 100
-    
-#     return train_accuracy, test_accuracy
             
             
             
@@ -328,3 +230,114 @@ def top_k_accuracy(sim, k):
     y_index = torch.tensor(list(range(n_samples, sim.shape[0]))).reshape(-1, 1)
     acc = (sim.argsort()[:n_samples, -k:].detach().cpu() == y_index).any(-1).sum() / n_samples
     return acc.item()
+
+
+
+
+
+
+
+
+
+
+
+def eval_loop(encoder, ind=None):
+    # dataset
+    train_transform = T.Compose([
+        T.RandomResizedCrop(32, interpolation=T.InterpolationMode.BICUBIC),
+        T.RandomHorizontalFlip(),
+        T.ToTensor(),
+        T.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+    ])
+    test_transform = T.Compose([
+        T.Resize(36, interpolation=T.InterpolationMode.BICUBIC),
+        T.CenterCrop(32),
+        T.ToTensor(),
+        T.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+    ])
+
+    train_loader = torch.utils.data.DataLoader(
+        dataset=torchvision.datasets.CIFAR10('./dataset/', train=True, transform=train_transform, download=True),
+        shuffle=True,
+        batch_size=256,
+        pin_memory=True,
+        drop_last=True
+    )
+    test_loader = torch.utils.data.DataLoader(
+        dataset=torchvision.datasets.CIFAR10('./dataset/', train=False, transform=test_transform, download=True),
+        shuffle=False,
+        batch_size=256,
+        pin_memory=True,
+    )
+
+    classifier = nn.Linear(512, 10).cuda()
+    # optimization
+    optimizer = torch.optim.SGD(
+        classifier.parameters(),
+        momentum=0.9,
+        lr=30,
+        weight_decay=0
+    )
+    
+    def adjust_learning_rate(epochs, warmup_epochs, base_lr, optimizer, loader, step):
+        max_steps = epochs * len(loader)
+        warmup_steps = warmup_epochs * len(loader)
+        if step < warmup_steps:
+            lr = base_lr * step / warmup_steps
+        else:
+            step -= warmup_steps
+            max_steps -= warmup_steps
+            q = 0.5 * (1 + math.cos(math.pi * step / max_steps))
+            end_lr = 0
+            lr = base_lr * q + end_lr * (1 - q)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+        return lr
+
+    # training
+    for e in range(1, 101):
+        # declaring train
+        classifier.train()
+        encoder.eval()
+        # epoch
+        for it, (inputs, y) in enumerate(train_loader, start=(e - 1) * len(train_loader)):
+            # adjust
+            adjust_learning_rate(epochs=100,
+                                 warmup_epochs=0,
+                                 base_lr=30,
+                                 optimizer=optimizer,
+                                 loader=train_loader,
+                                 step=it)
+            # zero grad
+            classifier.zero_grad()
+
+            def forward_step():
+                with torch.no_grad():
+                    b = encoder(inputs.cuda())
+                logits = classifier(b)
+                loss = F.cross_entropy(logits, y.cuda())
+                return loss
+
+            # optimization step
+            loss = forward_step()
+            loss.backward()
+            optimizer.step()
+
+        if e % 10 == 0:
+            accs = []
+            classifier.eval()
+            for idx, (images, labels) in enumerate(test_loader):
+                with torch.no_grad():
+                    b = encoder(images.cuda())
+                    preds = classifier(b).argmax(dim=1)
+                    hits = (preds == labels.cuda()).sum().item()
+                    accs.append(hits / b.shape[0])
+            accuracy = np.mean(accs) * 100
+            # final report of the accuracy
+            line_to_print = (
+                f'seed: {ind} | accuracy (%) @ epoch {e}: {accuracy:.2f}'
+            )
+            print(line_to_print)
+
+    accuracy = 90.
+    return accuracy

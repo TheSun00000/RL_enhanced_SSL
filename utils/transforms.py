@@ -207,6 +207,21 @@ def get_autoaugment_transforms(num_samples):
     return ret
 
 
+def get_random_transforms(num_samples, N=2):
+    operations = list(transformations_dict.keys())
+    
+    ret = []
+    for _ in range(num_samples):
+        policy = []
+        for __ in range(N):
+            name = random.choice(operations)
+            pr = random.random()
+            level = random.random()
+            policy.append((name, pr, level))
+        ret.append(policy)
+    
+    return ret
+
 
 def apply_transformations(img1, transform_list):
         

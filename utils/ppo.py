@@ -177,7 +177,7 @@ def collect_trajectories_with_input(
         # reward = transformations_strength + rot_acc
         # reward = similariy_reward_function(new_z1, new_z2) + rot_acc
         
-        # infoNCE_reward = infonce_reward_function(new_z1, new_z2)
+        infoNCE_reward = infonce_reward_function(new_z1, new_z2)
         # infoNCE_reward = standarize_reward(infoNCE_reward, 4.5, 5.5)
         
         # rotation_reward = 1 - standarize_reward(rot_loss, 0, 1.5)
@@ -201,12 +201,12 @@ def collect_trajectories_with_input(
             mean_strength += transformations_strength.mean().item()
 
     
-    string_transforms = []
-    for trans1, trans2 in zip(transforms_list_1, transforms_list_2):
-        s1 = ' '.join([ f'{name[:4]}_{round(level, 3)}' for (name, _, level) in trans1])
-        s2 = ' '.join([ f'{name[:4]}_{round(level, 3)}' for (name, _, level) in trans2])
-        string_transforms.append( f'{s1}  ||  {s2}' )
-    print_sorted_strings_with_counts(string_transforms, topk=5)
+    # string_transforms = []
+    # for trans1, trans2 in zip(transforms_list_1, transforms_list_2):
+    #     s1 = ' '.join([ f'{name[:4]}_{round(level, 3)}' for (name, _, level) in trans1])
+    #     s2 = ' '.join([ f'{name[:4]}_{round(level, 3)}' for (name, _, level) in trans2])
+    #     string_transforms.append( f'{s1}  ||  {s2}' )
+    # print_sorted_strings_with_counts(string_transforms, topk=5)
         
     mean_rewards /= (len_trajectory // batch_size)
     mean_rot_reward /= (len_trajectory // batch_size)

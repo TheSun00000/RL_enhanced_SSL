@@ -32,21 +32,21 @@ class SimCLR(nn.Module):
             nn.BatchNorm1d(2048, affine=False)
         )
         
-        # self.predictor = nn.Sequential(
-        #     nn.Linear(self.feature_dim, 2048),
-        #     nn.LayerNorm(2048),
-        #     nn.ReLU(inplace=True),  # first layer
-        #     nn.Linear(2048, 2048),
-        #     nn.LayerNorm(2048),
-        #     nn.ReLU(inplace=True),
-        #     nn.Linear(2048, 4)
-        # )
-        
         self.predictor = nn.Sequential(
             nn.Linear(self.feature_dim, 2048),
+            nn.LayerNorm(2048),
+            nn.ReLU(inplace=True),  # first layer
+            nn.Linear(2048, 2048),
+            nn.LayerNorm(2048),
             nn.ReLU(inplace=True),
             nn.Linear(2048, 4)
         )
+        
+        # self.predictor = nn.Sequential(
+        #     nn.Linear(self.feature_dim, 2048),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(2048, 4)
+        # )
 
     def forward(self, x):
         feature = self.enc(x)

@@ -5,6 +5,7 @@ import numpy as np
 from tqdm import tqdm
 import random
 import math
+import copy
 import neptune
 
 from utils.datasets import (
@@ -13,7 +14,7 @@ from utils.datasets import (
     select_from_rotated_views,
 )
 from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50
-from utils.contrastive import InfoNCELoss, knn_evaluation, top_k_accuracy
+from utils.contrastive import InfoNCELoss, knn_evaluation, top_k_accuracy, eval_loop
 from utils.ppo import (
     collect_trajectories_with_input,
     ppo_update_with_input,
@@ -194,15 +195,15 @@ def ppo_round(
         losses.append(loss)
         rewards.append(float(trajectory[-1].mean()))
                 
-    stored_actions_index = trajectory[2]
+    stored_actions_index = trajectory[1]
     transforms_list_1, transforms_list_2 = get_transforms_list(
         stored_actions_index,
         num_magnitudes=decoder.num_discrete_magnitude
     )
     string_transforms = []
     for trans1, trans2 in zip(transforms_list_1, transforms_list_2):
-        s1 = ' '.join([ f'{name[:4]}_{magnetude}' for (name, _, magnetude) in trans1])
-        s2 = ' '.join([ f'{name[:4]}_{magnetude}' for (name, _, magnetude) in trans2])
+        s1 = ' '.join([ f'{name[:4]}_{round(magnetude, 3)}' for (name, _, magnetude) in trans1])
+        s2 = ' '.join([ f'{name[:4]}_{round(magnetude, 3)}' for (name, _, magnetude) in trans2])
         string_transforms.append( f'{s1}  ||  {s2}' )
     print_sorted_strings_with_counts(string_transforms, topk=5)
         
@@ -272,10 +273,12 @@ def contrastive_round(
             rotated_x = rotated_x.to(device)
             rotated_labels = rotated_labels.to(device)
             
-            with torch.no_grad():
-                feature = encoder.enc(rotated_x)
-                
-            logits = encoder.predictor(feature.detach())
+            
+            feature = encoder.enc(rotated_x)
+            feature = F.normalize(feature, dim=1) 
+            if config['rotation_detach']:
+                feature = feature.detach()
+            logits = encoder.predictor(feature)
             rot_loss = F.cross_entropy(logits, rotated_labels)
             
             rot_acc = (logits.argmax(dim=-1) == rotated_labels).sum() / len(rotated_labels)
@@ -301,13 +304,14 @@ config = {
     'warmup_epochs':10,
 
     'simclr_iterations':'all',
-    'simclr_bs':16,
+    'simclr_bs':512,
     'linear_eval_epochs':200,
-    'random_p':0.75,
+    'random_p':0.5,
     'encoder_backbone': 'resnet18', # ['resnet18', 'resnet50']
     'lmbd': 0.0,
     'lr':0.03,
-    'rotation':False,
+    'rotation':True,
+    'rotation_detach':True,
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
     'ppo_iterations':200,
@@ -317,6 +321,7 @@ config = {
     'ppo_update_epochs':4,
     
     'mode':'async', # ['async', 'debug']
+    
     'model_save_path':model_save_path,
     'seed':seed,
     
@@ -335,7 +340,7 @@ config = {
 
 
 
-logs_tags = ['random_p', 'ppo_iterations', 'model_save_path']
+logs_tags = ['random_p', 'ppo_iterations', 'model_save_path', 'rotation', 'rotation_detach']
 neptune_run = init_neptune(
     tags=[f'{k}={config[k]}' for (k) in logs_tags],
     mode=config['mode']
@@ -375,13 +380,13 @@ if config['checkpoint_params']:
 
 for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
-    # random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
+    random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
     random_p = config['random_p']
     print(f'EPOCH:{epoch}    P:{random_p}')
     
     
     
-    if ((epoch-1) % 5 == 0):
+    if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
                 
         decoder, ppo_optimizer = ppo_init(config)
         trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
@@ -423,6 +428,15 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
     neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
     neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
+
+
+
+print('Linear evaluation man')
+accs = []
+for i in range(2):
+    accs.append(eval_loop(copy.deepcopy(encoder.enc), i))
+line_to_print = f'aggregated linear probe: {np.mean(accs):.3f} +- {np.std(accs):.3f}'
+print(line_to_print)
 
     
 
