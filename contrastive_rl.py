@@ -313,10 +313,12 @@ def contrastive_round(
             neptune_run["simclr/rot_loss"].append(rot_loss.item())
             neptune_run["simclr/rot_acc"].append(rot_acc.item())
         
-        avg_rot_loss.append(rot_loss.item())
+        if config['rotation']:
+            avg_rot_loss.append(rot_loss.item())
         avg_infoNCE_loss.append(simclr_loss.item())
         
-    avg_rot_loss = mean_last_percentage(avg_rot_loss, 0.5)
+    # avg_rot_loss = mean_last_percentage(avg_rot_loss, 0.5)
+    avg_rot_loss = 1
     avg_infoNCE_loss = mean_last_percentage(avg_infoNCE_loss, 0.5)
     
     return avg_rot_loss, avg_infoNCE_loss
@@ -333,7 +335,7 @@ config = {
     'encoder_backbone': 'resnet18', # ['resnet18', 'resnet50']
     'lmbd': 0.0,
     'lr':0.03,
-    'rotation':True,
+    'rotation':False,
     'rotation_detach':True,
     
     'augmentations':'ppo', # ['ppo', 'random']

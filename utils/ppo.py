@@ -149,40 +149,43 @@ def collect_trajectories_with_input(
             _, new_z1 = encoder(new_img1)
             _, new_z2 = encoder(new_img2)
             
-            rotated_x1, rotated_labels1 = rotate_images(new_img1)
-            rotated_x2, rotated_labels2 = rotate_images(new_img2)
+            # rotated_x1, rotated_labels1 = rotate_images(new_img1)
+            # rotated_x2, rotated_labels2 = rotate_images(new_img2)
             
-            rotated_x, rotated_labels = select_from_rotated_views(
-                rotated_x1, rotated_x2,
-                rotated_labels1, rotated_labels2
-            )            
+            # rotated_x, rotated_labels = select_from_rotated_views(
+            #     rotated_x1, rotated_x2,
+            #     rotated_labels1, rotated_labels2
+            # )            
             
-            rotated_x = rotated_x.to(device)
-            rotated_labels = rotated_labels.to(device)
+            # rotated_x = rotated_x.to(device)
+            # rotated_labels = rotated_labels.to(device)
             
-            feature = encoder.enc(rotated_x)
-            feature = F.normalize(feature, dim=1)
-            logits = encoder.predictor(feature)
+            # feature = encoder.enc(rotated_x)
+            # feature = F.normalize(feature, dim=1)
+            # logits = encoder.predictor(feature)
             
-            rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
-            rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
+            # rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
+            # rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
             
-            predicttion = logits.argmax(dim=-1)
-            rot_acc = 1. * (predicttion == rotated_labels)
-            rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
+            # predicttion = logits.argmax(dim=-1)
+            # rot_acc = 1. * (predicttion == rotated_labels)
+            # rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
             
             
                         
 
         # strength_reward = get_transformations_strength(actions_index)
         infoNCE_reward = infonce_reward_function(new_z1, new_z2) / avg_infoNCE_loss
-        rotation_reward = rot_loss / avg_rot_loss
+        # rotation_reward = rot_loss / avg_rot_loss
         
         rot_loss_w = eval(config['reward_rotation'])
         infonce_w = eval(config['reward_infoNCE'])
         
         # print(avg_rot_loss, avg_infoNCE_loss)
-        reward = rot_loss_w*rotation_reward + infonce_w*infoNCE_reward
+        # reward = rot_loss_w*rotation_reward + infonce_w*infoNCE_reward
+
+        a, b = 1.2, 0.4
+        reward = torch.where(infoNCE_reward <= a, infoNCE_reward, (-a/b)*(infoNCE_reward-(a+b)))
         
         stored_log_p[begin:end] = log_p.detach().cpu()
         stored_actions_index += actions_index
