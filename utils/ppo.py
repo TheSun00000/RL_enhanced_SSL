@@ -36,7 +36,7 @@ def similariy_reward_function(new_z1, new_z2):
 def infonce_reward_function(new_z1, new_z2):
     bs = new_z1.shape[0]
     full_similarity_matrix, logits, loss = infonce_reward(new_z1, new_z2, temperature=0.5)
-    reward = loss
+    reward = (loss[:bs] + loss[bs:]) / 2
     return reward
 
 
@@ -74,6 +74,7 @@ def collect_trajectories_with_input(
         len_trajectory: int,
         encoder: SimCLR,
         decoder: DecoderNN_1input,
+        config: dict,
         batch_size: int,
         neptune_run: neptune.Run
     ):
@@ -138,7 +139,7 @@ def collect_trajectories_with_input(
         
         rotation_reward = None
         infoNCE_reward = None
-        transformations_strength = None
+        strength_reward = None
         
         encoder.eval()
         with torch.no_grad():
@@ -169,22 +170,15 @@ def collect_trajectories_with_input(
             
             rotation_reward = rot_acc
                         
-            
-        new_img1 = new_img1.to('cpu')
-        new_img2 = new_img2.to('cpu')
 
-        transformations_strength = get_transformations_strength(actions_index)
-        # reward = transformations_strength + rot_acc
-        # reward = similariy_reward_function(new_z1, new_z2) + rot_acc
-        
+        # strength_reward = get_transformations_strength(actions_index)
         infoNCE_reward = infonce_reward_function(new_z1, new_z2)
-        # infoNCE_reward = standarize_reward(infoNCE_reward, 4.5, 5.5)
         
-        # rotation_reward = 1 - standarize_reward(rot_loss, 0, 1.5)
-        # reward = infoNCE_reward + rotation_reward
-        # reward=infoNCE_reward
-        # reward = similariy_reward_function(new_z1, new_z2)
-        reward = - rot_loss
+        
+        rot_loss_w = eval(config['reward_rotation'])
+        infonce_w = eval(config['reward_infoNCE'])
+        
+        reward = rot_loss_w*rot_loss + infonce_w*infoNCE_reward
         
         stored_log_p[begin:end] = log_p.detach().cpu()
         stored_actions_index += actions_index
@@ -197,8 +191,8 @@ def collect_trajectories_with_input(
             mean_rot_reward += rotation_reward.mean().item()
         if infoNCE_reward is not None:
             mean_infonce_reward += infoNCE_reward.mean().item()
-        if transformations_strength is not None:
-            mean_strength += transformations_strength.mean().item()
+        if strength_reward is not None:
+            mean_strength += strength_reward.mean().item()
 
     
     # string_transforms = []
@@ -220,7 +214,7 @@ def collect_trajectories_with_input(
         neptune_run["ppo/rot_reward"].append(mean_rot_reward)
     if infoNCE_reward is not None:
         neptune_run["ppo/infonce_reward"].append(mean_infonce_reward)
-    if transformations_strength is not None:
+    if strength_reward is not None:
         neptune_run["ppo/strength_reward"].append(mean_strength)
 
     # print('mean_entropy:', mean_entropy)

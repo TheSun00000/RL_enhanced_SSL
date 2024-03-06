@@ -185,7 +185,6 @@ def split_interval(lower: float, upper: float, N: int):
     return split_points   
 
 
-
 def get_transforms_list(actions, num_magnitudes):
     
     return (
@@ -221,6 +220,25 @@ def get_random_transforms(num_samples, N=2):
         ret.append(policy)
     
     return ret
+
+
+class RandomAugmentation(object):
+    def __init__(self, N):
+        self.N = N
+
+    def __call__(self, img):
+        operations = list(transformations_dict.keys())
+        
+        for _ in range(self.N):
+            name = random.choice(operations)
+            pr = random.random()
+            level = random.random()
+            
+            if random.random() > pr:
+                continue
+            img = apply_augment(img, name, level)
+            
+        return img
 
 
 def apply_transformations(img1, transform_list):

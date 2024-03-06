@@ -8,7 +8,8 @@ from utils.transforms import (
     apply_transformations,
     get_transforms_list,
     get_autoaugment_transforms,
-    get_random_transforms
+    get_random_transforms,
+    RandomAugmentation
 )
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -139,11 +140,13 @@ class DataLoaderWrapper:
         self.random_p = random_p
         self.spatial_only = spatial_only
                 
-        self.color_transformation = transforms.Compose([
-            transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-            transforms.RandomGrayscale(p=0.2),
-            # transforms.RandomApply([transforms.GaussianBlur(kernel_size=int(0.1*32), sigma=(0.1, 2))], p=0.5),
-        ])
+        # self.color_transformation = transforms.Compose([
+        #     transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+        #     transforms.RandomGrayscale(p=0.2),
+        #     # transforms.RandomApply([transforms.GaussianBlur(kernel_size=int(0.1*32), sigma=(0.1, 2))], p=0.5),
+        # ])
+        
+        self.color_transformation = RandomAugmentation(N=2)
         
         self.normalization = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
         
@@ -223,7 +226,11 @@ class DataLoaderWrapper:
         new_x1[x1_ppo_aug_idx] = decoder_x1
         new_x2[x2_ppo_aug_idx] = decoder_x2
         
-        return (new_x1, new_x2)
+        # plot_images_stacked(new_x1[:10], new_x2[:10])
+        
+        new_x = torch.stack([self.last_transform(img) for img in x])
+        
+        return (new_x, new_x1, new_x2)
      
     
     def __len__(self):

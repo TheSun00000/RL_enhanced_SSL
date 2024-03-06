@@ -180,6 +180,7 @@ def ppo_round(
             len_trajectory=len_trajectory,
             encoder=encoder,
             decoder=decoder,
+            config=config,
             batch_size=batch_size,
             neptune_run=neptune_run
         )
@@ -234,16 +235,13 @@ def contrastive_round(
         spatial_only=False,
     )
     
-    # train_loader = get_essl_train_loader()
-
-    
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[contrastive_round]')
     
     lr = None
     
     encoder.train()
     
-    for it, ((x1, x2), y) in tqdm_train_loader:
+    for it, ((org_x, x1, x2), y) in tqdm_train_loader:
         
         lr = adjust_learning_rate(epochs=config['epochs'],
             warmup_epochs=config['warmup_epochs'],
@@ -313,12 +311,17 @@ config = {
     'rotation':True,
     'rotation_detach':True,
     
+    'augmentations':'ppo', # ['ppo', 'random']
+    
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
     'ppo_iterations':200,
     'ppo_len_trajectory':128,
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
+    
+    'reward_rotation':'-1',
+    'reward_infoNCE':'0',
     
     'mode':'async', # ['async', 'debug']
     
@@ -333,6 +336,31 @@ config = {
 }
 
 
+def get_reward_function_formula(config):
+    formula = ""
+    if eval(config['reward_rotation']) != 0:
+        if eval(config['reward_rotation']) != 1:
+            formula += f"{config['reward_rotation']}*"
+        formula += "rot_loss"
+        formula += " + "
+    
+    if eval(config['reward_infoNCE']) != 0:
+        if eval(config['reward_infoNCE']) != 1:
+            formula += f"{config['reward_infoNCE']}*"
+        formula += "infoNCE"
+        formula += " + "
+        
+    if formula.endswith(' + '):
+        formula = formula[:-3]
+    
+    return formula.strip()
+
+
+
+reward_formula = get_reward_function_formula(config)
+print('reward function:', reward_formula)
+
+
 (
     (encoder, simclr_optimizer, simclr_criterion),
     (decoder, ppo_optimizer) 
@@ -342,7 +370,7 @@ config = {
 
 logs_tags = ['random_p', 'ppo_iterations', 'model_save_path', 'rotation', 'rotation_detach']
 neptune_run = init_neptune(
-    tags=[f'{k}={config[k]}' for (k) in logs_tags],
+    tags=[f'{k}={config[k]}' for (k) in logs_tags] + [reward_formula],
     mode=config['mode']
 )
 neptune_run["scripts"].upload_files(["./utils/*.py", "./*.py"])
@@ -386,16 +414,16 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     
     
-    # if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
+    if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
                 
-    #     decoder, ppo_optimizer = ppo_init(config)
-    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-    #         encoder=encoder, 
-    #         decoder=decoder,
-    #         optimizer=ppo_optimizer,
-    #         config=config,
-    #         neptune_run=neptune_run
-    #     )
+        decoder, ppo_optimizer = ppo_init(config)
+        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+            encoder=encoder, 
+            decoder=decoder,
+            optimizer=ppo_optimizer,
+            config=config,
+            neptune_run=neptune_run
+        )
     
     
     
