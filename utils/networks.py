@@ -330,7 +330,7 @@ class DecoderNN_1input(nn.Module):
                     for s in range(self.seq_length):
                         transform_id = self.transforms.index(old_action[i][b][s][0])
                         level = old_action[i][b][s][2]
-                        magnitude_id = round(level * self.num_discrete_magnitude)
+                        magnitude_id = round(level * (self.num_discrete_magnitude-1))
                         old_transform_actions_index[i, b, s] = transform_id
                         old_magnitude_actions_index[i, b, s] = magnitude_id
             
@@ -398,7 +398,7 @@ class DecoderNN_1input(nn.Module):
             action[-1].append([])
             for b in range(2):
                 for s in range(self.seq_length):
-                    level = (magnitude_history[i, b, s] / self.num_discrete_magnitude).item()                    
+                    level = (magnitude_history[i, b, s] / (self.num_discrete_magnitude-1)).item()                    
                     action[-1][b].append((
                         self.transforms[transform_history[i, b, s]],
                         0.8,

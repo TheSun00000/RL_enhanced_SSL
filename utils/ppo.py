@@ -75,12 +75,15 @@ def collect_trajectories_with_input(
         encoder: SimCLR,
         decoder: DecoderNN_1input,
         config: dict,
+        avg_loss: tuple,
         batch_size: int,
         neptune_run: neptune.Run
     ):
 
     assert len_trajectory % batch_size == 0
 
+    avg_rot_loss, avg_infoNCE_loss = avg_loss
+    
     data_loader = get_cifar10_dataloader(
         num_steps=len_trajectory // batch_size,
         batch_size=batch_size,
@@ -168,17 +171,18 @@ def collect_trajectories_with_input(
             rot_acc = 1. * (predicttion == rotated_labels)
             rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
             
-            rotation_reward = rot_acc
+            
                         
 
         # strength_reward = get_transformations_strength(actions_index)
-        infoNCE_reward = infonce_reward_function(new_z1, new_z2)
-        
+        infoNCE_reward = infonce_reward_function(new_z1, new_z2) / avg_infoNCE_loss
+        rotation_reward = rot_loss / avg_rot_loss
         
         rot_loss_w = eval(config['reward_rotation'])
         infonce_w = eval(config['reward_infoNCE'])
         
-        reward = rot_loss_w*rot_loss + infonce_w*infoNCE_reward
+        # print(avg_rot_loss, avg_infoNCE_loss)
+        reward = rot_loss_w*rotation_reward + infonce_w*infoNCE_reward
         
         stored_log_p[begin:end] = log_p.detach().cpu()
         stored_actions_index += actions_index

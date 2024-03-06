@@ -52,7 +52,18 @@ def cuda_memory_usage():
     print(f'allocated memory: {a/1024**3:.4f}')
     print(f'free memory: {f/1024**3:.4f}')
     
+def mean_last_percentage(lst, P):
 
+    # Calculate the number of elements to consider based on the percentage
+    num_elements = int(len(lst) * P)
+    
+    # Extract the last percentage of elements
+    last_percentage_elements = lst[-num_elements:]
+
+    # Calculate the mean
+    mean_value = sum(last_percentage_elements) / len(last_percentage_elements)
+    
+    return mean_value
 
 
 def ppo_init(config: dict):
@@ -154,6 +165,7 @@ def ppo_round(
         decoder: DecoderNN_1input,
         optimizer: torch.optim.Optimizer,
         config: dict,
+        avg_loss: tuple,
         neptune_run: neptune.Run
     ):
     
@@ -180,6 +192,7 @@ def ppo_round(
             len_trajectory=len_trajectory,
             encoder=encoder,
             decoder=decoder,
+            avg_loss=avg_loss,
             config=config,
             batch_size=batch_size,
             neptune_run=neptune_run
@@ -239,6 +252,10 @@ def contrastive_round(
     
     lr = None
     
+    avg_rot_loss = []
+    avg_infoNCE_loss = []
+    
+    
     encoder.train()
     
     for it, ((org_x, x1, x2), y) in tqdm_train_loader:
@@ -295,6 +312,14 @@ def contrastive_round(
         if config['rotation']:
             neptune_run["simclr/rot_loss"].append(rot_loss.item())
             neptune_run["simclr/rot_acc"].append(rot_acc.item())
+        
+        avg_rot_loss.append(rot_loss.item())
+        avg_infoNCE_loss.append(simclr_loss.item())
+        
+    avg_rot_loss = mean_last_percentage(avg_rot_loss, 0.5)
+    avg_infoNCE_loss = mean_last_percentage(avg_infoNCE_loss, 0.5)
+    
+    return avg_rot_loss, avg_infoNCE_loss
 
 
 config = {
@@ -321,7 +346,7 @@ config = {
     'ppo_update_epochs':4,
     
     'reward_rotation':'-1',
-    'reward_infoNCE':'0',
+    'reward_infoNCE':'1',
     
     'mode':'async', # ['async', 'debug']
     
@@ -370,7 +395,7 @@ print('reward function:', reward_formula)
 
 logs_tags = ['random_p', 'ppo_iterations', 'model_save_path', 'rotation', 'rotation_detach']
 neptune_run = init_neptune(
-    tags=[f'{k}={config[k]}' for (k) in logs_tags] + [reward_formula],
+    tags=[f'{k}={config[k]}' for (k) in logs_tags] + [f'reward={reward_formula}'],
     mode=config['mode']
 )
 neptune_run["scripts"].upload_files(["./utils/*.py", "./*.py"])
@@ -404,30 +429,30 @@ if config['checkpoint_params']:
     prev_run.stop()
 
 
-
+avg_loss = (1, 1)
 
 for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
-    # random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
-    random_p = config['random_p']
+    random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
+    # random_p = config['random_p']
     print(f'EPOCH:{epoch}    P:{random_p}')
     
     
     
     if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
-                
         decoder, ppo_optimizer = ppo_init(config)
         trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
             encoder=encoder, 
             decoder=decoder,
             optimizer=ppo_optimizer,
             config=config,
+            avg_loss=avg_loss,
             neptune_run=neptune_run
         )
     
     
     
-    contrastive_round(
+    avg_rot_loss, avg_infoNCE_loss = contrastive_round(
         encoder=encoder,
         decoder=decoder,
         epoch=epoch,
@@ -437,6 +462,11 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
         random_p=random_p,
         neptune_run=neptune_run
     )
+    
+    avg_loss = (avg_rot_loss, avg_infoNCE_loss)
+    
+    print('avg_rot_loss:', avg_rot_loss)
+    print('avg_infoNCE_loss:', avg_infoNCE_loss)
 
     if epoch % 1 == 0:
         test_acc = knn_evaluation(encoder)
@@ -446,25 +476,26 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     
     
+    if (epoch % 10 == 0) or (epoch == config['epochs']):
     
-    torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
-    torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
-    torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
-    torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
-    
-    neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
-    neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
-    neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
-    neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
+        torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
+        torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
+        torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')
+        torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/decoder_opt.pt')
+        
+        neptune_run["params/encoder"].upload(f'{model_save_path}/encoder.pt')
+        neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
+        neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
+        neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
 
 
 
 print('Linear evaluation man')
 accs = []
-for i in range(2):
+for i in range(5):
     accs.append(eval_loop(copy.deepcopy(encoder.enc), i))
-line_to_print = f'aggregated linear probe: {np.mean(accs):.3f} +- {np.std(accs):.3f}'
-print(line_to_print)
+    line_to_print = f'aggregated linear probe: {np.mean(accs):.3f} +- {np.std(accs):.3f}'
+    print(line_to_print)
 
     
 

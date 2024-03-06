@@ -187,19 +187,19 @@ class DataLoaderWrapper:
 
 
         if len(decoder_x1) + len(decoder_x2):
-            # with torch.no_grad():
-            #     (_, actions_index, _) = self.decoder(batch_size=len(decoder_x1)+len(decoder_x2))
-            #     # actions_index = self.decoder.sample(num_samples=len(decoder_x1)+len(decoder_x2))
-            #     actions_index_1, actions_index_2 = actions_index[:len(decoder_x1)], actions_index[len(decoder_x1):]
+            with torch.no_grad():
+                (_, actions_index, _) = self.decoder(batch_size=len(decoder_x1)+len(decoder_x2))
+                # actions_index = self.decoder.sample(num_samples=len(decoder_x1)+len(decoder_x2))
+                actions_index_1, actions_index_2 = actions_index[:len(decoder_x1)], actions_index[len(decoder_x1):]
             
-            # num_discrete_magnitude = self.decoder.num_discrete_magnitude
-            # transforms_list_1, _ = get_transforms_list(actions_index_1, num_magnitudes=num_discrete_magnitude)
-            # _, transforms_list_2 = get_transforms_list(actions_index_2, num_magnitudes=num_discrete_magnitude)
+            num_discrete_magnitude = self.decoder.num_discrete_magnitude
+            transforms_list_1, _ = get_transforms_list(actions_index_1, num_magnitudes=num_discrete_magnitude)
+            _, transforms_list_2 = get_transforms_list(actions_index_2, num_magnitudes=num_discrete_magnitude)
             
             # transforms_list_1 = get_autoaugment_transforms(num_samples=len(decoder_x1))
             # transforms_list_2 = get_autoaugment_transforms(num_samples=len(decoder_x2))
-            transforms_list_1 = get_random_transforms(num_samples=len(decoder_x1))
-            transforms_list_2 = get_random_transforms(num_samples=len(decoder_x2))
+            # transforms_list_1 = get_random_transforms(num_samples=len(decoder_x1))
+            # transforms_list_2 = get_random_transforms(num_samples=len(decoder_x2))
                         
             decoder_x1 = apply_transformations(decoder_x1, transforms_list_1)
             decoder_x2 = apply_transformations(decoder_x2, transforms_list_2)
