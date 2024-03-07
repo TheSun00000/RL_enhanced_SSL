@@ -1,3 +1,4 @@
+import os
 import torch
 from torch.utils.data import DataLoader, Dataset
 import torch.nn.functional as F
@@ -346,6 +347,8 @@ config = {
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
+    'reward_a':1.1,
+    'reward_b':0.2,
     
     'reward_rotation':'-1',
     'reward_infoNCE':'1',
@@ -384,8 +387,8 @@ def get_reward_function_formula(config):
 
 
 
-reward_formula = get_reward_function_formula(config)
-print('reward function:', reward_formula)
+# reward_formula = get_reward_function_formula(config)
+# print('reward function:', reward_formula)
 
 
 (
@@ -395,9 +398,9 @@ print('reward function:', reward_formula)
 
 
 
-logs_tags = ['random_p', 'ppo_iterations', 'model_save_path', 'rotation', 'rotation_detach']
+logs_tags = ['random_p', 'model_save_path', 'reward_a', 'reward_b']
 neptune_run = init_neptune(
-    tags=[f'{k}={config[k]}' for (k) in logs_tags] + [f'reward={reward_formula}'],
+    tags=[f'{k}={config[k]}' for (k) in logs_tags],
     mode=config['mode']
 )
 neptune_run["scripts"].upload_files(["./utils/*.py", "./*.py"])
@@ -477,9 +480,16 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
 
     
     
+    if epoch in [200, 400, 600, 800]:
+        os.mkdir(f'{model_save_path}/epoch_{epoch}/')
+        torch.save(encoder.state_dict(), f'{model_save_path}/epoch_{epoch}/encoder.pt')
+        torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/epoch_{epoch}/encoder_opt.pt')
+        torch.save(decoder.state_dict(), f'{model_save_path}/epoch_{epoch}/decoder.pt')
+        torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/epoch_{epoch}/decoder_opt.pt')
+    
+    
     
     if (epoch % 10 == 0) or (epoch == config['epochs']):
-    
         torch.save(encoder.state_dict(), f'{model_save_path}/encoder.pt')
         torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/encoder_opt.pt')
         torch.save(decoder.state_dict(), f'{model_save_path}/decoder.pt')

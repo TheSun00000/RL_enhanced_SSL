@@ -184,7 +184,7 @@ def collect_trajectories_with_input(
         # print(avg_rot_loss, avg_infoNCE_loss)
         # reward = rot_loss_w*rotation_reward + infonce_w*infoNCE_reward
 
-        a, b = 1.2, 0.4
+        a, b = config['reward_a'], config['reward_b']
         reward = torch.where(infoNCE_reward <= a, infoNCE_reward, (-a/b)*(infoNCE_reward-(a+b)))
         
         stored_log_p[begin:end] = log_p.detach().cpu()
@@ -306,7 +306,7 @@ def ppo_update_with_input(
             surr2 = torch.clamp(ratio, 1-0.2, 1+0.2) * advantage            
             actor_loss = - torch.min(surr1, surr2).mean()
 
-            loss = actor_loss - 0.0*entropy.mean()
+            loss = actor_loss - 0.01*entropy.mean()
             
             # print(entropy)
             # print('reward:', reward[:5].detach().cpu().numpy().tolist())
