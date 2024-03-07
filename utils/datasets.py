@@ -146,7 +146,7 @@ class DataLoaderWrapper:
         #     # transforms.RandomApply([transforms.GaussianBlur(kernel_size=int(0.1*32), sigma=(0.1, 2))], p=0.5),
         # ])
         
-        self.color_transformation = RandomAugmentation(N=2)
+        self.color_transformation = RandomAugmentation(N=2, pr=0.8)
         
         self.normalization = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
         

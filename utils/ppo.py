@@ -306,7 +306,7 @@ def ppo_update_with_input(
             surr2 = torch.clamp(ratio, 1-0.2, 1+0.2) * advantage            
             actor_loss = - torch.min(surr1, surr2).mean()
 
-            loss = actor_loss - 0.01*entropy.mean()
+            loss = actor_loss - 0.05*entropy.mean()
             
             # print(entropy)
             # print('reward:', reward[:5].detach().cpu().numpy().tolist())

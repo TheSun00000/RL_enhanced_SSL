@@ -342,12 +342,12 @@ config = {
     'augmentations':'ppo', # ['ppo', 'random']
     
     'ppo_decoder': 'with_input', # ['no_input', 'with_input']
-    'ppo_iterations':200,
+    'ppo_iterations':100,
     'ppo_len_trajectory':128,
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
-    'reward_a':1.1,
+    'reward_a':1.01,
     'reward_b':0.2,
     
     'reward_rotation':'-1',

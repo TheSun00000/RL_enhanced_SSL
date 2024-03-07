@@ -206,7 +206,7 @@ def get_autoaugment_transforms(num_samples):
     return ret
 
 
-def get_random_transforms(num_samples, N=2):
+def get_random_transforms(num_samples, N=2, pr=None):
     operations = list(transformations_dict.keys())
     
     ret = []
@@ -214,7 +214,8 @@ def get_random_transforms(num_samples, N=2):
         policy = []
         for __ in range(N):
             name = random.choice(operations)
-            pr = random.random()
+            if pr == None:
+                pr = random.random()
             level = random.random()
             policy.append((name, pr, level))
         ret.append(policy)
@@ -223,15 +224,19 @@ def get_random_transforms(num_samples, N=2):
 
 
 class RandomAugmentation(object):
-    def __init__(self, N):
+    def __init__(self, N, pr=None):
         self.N = N
+        self.pr = pr
 
     def __call__(self, img):
         operations = list(transformations_dict.keys())
         
         for _ in range(self.N):
             name = random.choice(operations)
-            pr = random.random()
+            if self.pr == None:
+                pr = random.random()
+            else:
+                pr = self.pr
             level = random.random()
             
             if random.random() > pr:
