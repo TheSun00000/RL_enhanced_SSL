@@ -7,10 +7,11 @@ from utils.networks import DecoderNN_1input
 from utils.transforms import (
     apply_transformations,
     get_transforms_list,
-    get_autoaugment_transforms,
-    get_random_transforms,
-    RandomAugmentation
+    RandomAugmentation,
+    Augmentation
 )
+
+import random
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device
@@ -91,25 +92,10 @@ def select(list, ids):
 
 cifar10_dataset = torchvision.datasets.CIFAR10('dataset', download=True)
 
-
-
-class FeatureDataset(Dataset):
-    def __init__(self, features, targets):
-        super().__init__()
-        self.features = features
-        self.targets = targets
-        
-    def __len__(self):
-        return len(self.features)
-    
-    def __getitem__(self, idx):
-        x = self.features[idx]
-        y = self.targets[idx]
-        return x, y
     
     
 
-class MyDatset(Dataset):
+class MyRawDatset(Dataset):
     def __init__(self, train_dataset):
         self.train_dataset = train_dataset
 
@@ -121,7 +107,7 @@ class MyDatset(Dataset):
         return img, y
 
 
-def MyDatset_collate_fn(imgs_y):
+def MyRawDatset_collate_fn(imgs_y):
     imgs, targets = [], []
     for img, y in imgs_y:
         imgs.append(img)
@@ -132,106 +118,9 @@ def MyDatset_collate_fn(imgs_y):
 
 
 class DataLoaderWrapper:
-    def __init__(self, dataloder, steps, encoder, decoder, random_p, spatial_only):
-        self.dataloder = dataloder
+    def __init__(self, dataloder, steps):
         self.steps = steps
-        self.encoder = encoder
-        self.decoder = decoder
-        self.random_p = random_p
-        self.spatial_only = spatial_only
-                
-        # self.color_transformation = transforms.Compose([
-        #     transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-        #     transforms.RandomGrayscale(p=0.2),
-        #     # transforms.RandomApply([transforms.GaussianBlur(kernel_size=int(0.1*32), sigma=(0.1, 2))], p=0.5),
-        # ])
-        
-        self.color_transformation = RandomAugmentation(N=2, pr=0.8)
-        
-        self.normalization = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
-        
-        self.last_transform = transforms.Compose([
-            transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ToTensor(),
-            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
-        ])
-
-    
-    def decoder_transform(self, x):
-
-        batch_size = len(x)
-        
-        is_x1_random_aug = (torch.rand((batch_size)) < self.random_p) * 1
-        is_x2_random_aug = (torch.rand((batch_size)) < self.random_p) * 1
-        
-        is_x1_ppo_aug = 1 - is_x1_random_aug
-        is_x2_ppo_aug = 1 - is_x2_random_aug
-        
-        x1_random_aug_idx = torch.arange(0, len(is_x1_random_aug))[is_x1_random_aug.bool()]
-        x2_random_aug_idx = torch.arange(0, len(is_x2_random_aug))[is_x2_random_aug.bool()]
-        x1_ppo_aug_idx = torch.arange(0, len(is_x1_ppo_aug))[is_x1_ppo_aug.bool()]
-        x2_ppo_aug_idx = torch.arange(0, len(is_x2_ppo_aug))[is_x2_ppo_aug.bool()]
-        
-        
-        if self.spatial_only:
-            return x
-                
-        random_x1 = select(x, x1_random_aug_idx)
-        random_x2 = select(x, x2_random_aug_idx)
-        decoder_x1 = select(x, x1_ppo_aug_idx)
-        decoder_x2 = select(x, x2_ppo_aug_idx)
-        
-        random_x1 = [self.color_transformation(img) for img in random_x1]
-        random_x2 = [self.color_transformation(img) for img in random_x2]
-
-
-        if len(decoder_x1) + len(decoder_x2):
-            with torch.no_grad():
-                (_, actions_index, _) = self.decoder(batch_size=len(decoder_x1)+len(decoder_x2))
-                # actions_index = self.decoder.sample(num_samples=len(decoder_x1)+len(decoder_x2))
-                actions_index_1, actions_index_2 = actions_index[:len(decoder_x1)], actions_index[len(decoder_x1):]
-            
-            num_discrete_magnitude = self.decoder.num_discrete_magnitude
-            transforms_list_1, _ = get_transforms_list(actions_index_1, num_magnitudes=num_discrete_magnitude)
-            _, transforms_list_2 = get_transforms_list(actions_index_2, num_magnitudes=num_discrete_magnitude)
-            
-            # transforms_list_1 = get_autoaugment_transforms(num_samples=len(decoder_x1))
-            # transforms_list_2 = get_autoaugment_transforms(num_samples=len(decoder_x2))
-            # transforms_list_1 = get_random_transforms(num_samples=len(decoder_x1))
-            # transforms_list_2 = get_random_transforms(num_samples=len(decoder_x2))
-                        
-            decoder_x1 = apply_transformations(decoder_x1, transforms_list_1)
-            decoder_x2 = apply_transformations(decoder_x2, transforms_list_2)
-        
-        
-        new_x1 = torch.zeros((batch_size, 3, 32, 32), dtype=torch.float32)
-        new_x2 = torch.zeros((batch_size, 3, 32, 32), dtype=torch.float32)
-        
-        
-        random_x1 = torch.stack([self.last_transform(img) for img in random_x1]) if len(random_x1) else random_x1
-        random_x2 = torch.stack([self.last_transform(img) for img in random_x2]) if len(random_x2) else random_x2
-        decoder_x1 = torch.stack([self.last_transform(img) for img in decoder_x1]) if len(decoder_x1) else decoder_x1
-        decoder_x2 = torch.stack([self.last_transform(img) for img in decoder_x2]) if len(decoder_x2) else decoder_x2
-        
-        random_x1 = random_x1 if len(random_x1) else torch.zeros((0, 3, 32, 32), dtype=torch.float32)
-        random_x2 = random_x2 if len(random_x2) else torch.zeros((0, 3, 32, 32), dtype=torch.float32)
-        decoder_x1 = decoder_x1 if len(decoder_x1) else torch.zeros((0, 3, 32, 32), dtype=torch.float32)
-        decoder_x2 = decoder_x2 if len(decoder_x2) else torch.zeros((0, 3, 32, 32), dtype=torch.float32)
-        
-
-        new_x1[x1_random_aug_idx] = random_x1
-        new_x2[x2_random_aug_idx] = random_x2
-        
-        new_x1[x1_ppo_aug_idx] = decoder_x1
-        new_x2[x2_ppo_aug_idx] = decoder_x2
-        
-        # plot_images_stacked(new_x1[:10], new_x2[:10])
-        
-        new_x = torch.stack([self.last_transform(img) for img in x])
-        
-        return (new_x, new_x1, new_x2)
-     
+        self.dataloder = dataloder
     
     def __len__(self):
         if self.steps in ['all', -1]:
@@ -249,31 +138,84 @@ class DataLoaderWrapper:
                 except StopIteration:
                     iterator = iter(self.dataloder)
                     x, y = next(iterator)
-                
-                x = self.decoder_transform(x)
                 yield x, y
                 
         else: # self.steps in ['all', -1]
             for x, y in iterator:
-                x = self.decoder_transform(x)
                 yield x, y
           
 
 
-def get_cifar10_dataloader(num_steps, batch_size, encoder=None, decoder=None, random_p=0.0, spatial_only=False):
-        
-    dataset = MyDatset(cifar10_dataset)
-    data_loader = DataLoader(dataset, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=MyDatset_collate_fn)
-    wrapped_data_loader = DataLoaderWrapper(
-        data_loader,
-        num_steps,
-        encoder=encoder,
-        decoder=decoder,
-        random_p=random_p,
-        spatial_only=spatial_only
-    )
 
-    return wrapped_data_loader
+class MyDatset(Dataset):
+    def __init__(self, train_dataset, policies, random_p, ppo_dist):
+        self.train_dataset = train_dataset
+        self.policies = policies
+        self.random_p = random_p
+        
+        self.random_policy = RandomAugmentation(N=2, pr=0.8)
+        self.ppo_policy = None
+        if random_p != 1:
+            self.ppo_policy = Augmentation(policies, dist=ppo_dist)
+        
+        self.last_transform = transforms.Compose([
+            transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        ])
+
+
+    def __len__(self,):
+        return len(self.train_dataset)
+    
+    def __getitem__(self, i):
+        img, y = self.train_dataset[i][0], self.train_dataset[i][1]
+        img1, img2 = img.copy(), img.copy()
+        
+        img1_is_random = random.random() < self.random_p
+        img2_is_random = random.random() < self.random_p
+        
+        if img1_is_random and img2_is_random:
+            img1 = self.random_policy(img1)
+            img2 = self.random_policy(img2)
+        
+        elif not img1_is_random and img2_is_random:
+            img1 = self.ppo_policy(img1, branch=1)
+            img2 = self.random_policy(img2)
+        
+        elif img1_is_random and not img2_is_random:
+            img1 = self.random_policy(img1)
+            img2 = self.ppo_policy(img2, branch=2)
+        
+        elif not img1_is_random and not img2_is_random:
+            img1, img2 = self.ppo_policy(img) 
+        
+        img = self.last_transform(img)
+        img1 = self.last_transform(img1)
+        img2 = self.last_transform(img2)
+        y = torch.tensor(y, dtype=torch.long).unsqueeze(0)
+        
+        return img, img1, img2, y
+
+
+
+
+
+def get_cifar10_dataloader(batch_size, random_p, all_policies, ppo_dist):
+    
+    dataset = MyDatset(cifar10_dataset, all_policies, random_p, ppo_dist)
+    data_loader = DataLoader(dataset, batch_size=batch_size, drop_last=True, shuffle=True)
+
+    return data_loader
+
+def get_cifar10_raw_dataloader(num_steps, batch_size):
+    
+    dataset = MyRawDatset(cifar10_dataset)
+    data_loader = DataLoader(dataset, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=MyRawDatset_collate_fn)
+    data_loader = DataLoaderWrapper(data_loader, num_steps)
+
+    return data_loader
 
 
 def select_from_rotated_views(rotated_x1, rotated_x2, rotated_labels1, rotated_labels2):

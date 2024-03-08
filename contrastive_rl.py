@@ -11,9 +11,7 @@ import neptune
 import pickle
 
 from utils.datasets import (
-    get_cifar10_dataloader, 
-    rotate_images, 
-    select_from_rotated_views,
+    get_cifar10_dataloader
 )
 from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50
 from utils.contrastive import InfoNCELoss, knn_evaluation, top_k_accuracy, eval_loop, get_avg_loss
@@ -22,7 +20,7 @@ from utils.ppo import (
     ppo_update_with_input,
     print_sorted_strings_with_counts
 )
-from utils.transforms import get_transforms_list, NUM_DISCREATE, transformations_dict
+from utils.transforms import get_transforms_list, NUM_DISCREATE, transformations_dict, get_policy_distribution
 from utils.logs import init_neptune, get_model_save_path
 
 # seed = random.randint(0, 100000)
@@ -74,14 +72,11 @@ def ppo_init(config: dict):
     # encoder.load_state_dict(torch.load('params/resnet18_contrastive_only_colorjitter.pt'))
     # encoder = encoder.to(device)
 
-    if config['ppo_decoder']  == 'with_input':
-        decoder = DecoderNN_1input(
-            transforms=list(transformations_dict.keys()),
-            num_discrete_magnitude=NUM_DISCREATE,
-            device=device
-        )
-    else:
-        raise NotImplementedError
+    decoder = DecoderNN_1input(
+        transforms=list(transformations_dict.keys()),
+        num_discrete_magnitude=NUM_DISCREATE,
+        device=device
+    )
     
     # decoder.load_state_dict(torch.load('params/params_125/decoder.pt'))
     decoder = decoder.to(device)
@@ -167,7 +162,7 @@ def ppo_round(
         decoder: DecoderNN_1input,
         optimizer: torch.optim.Optimizer,
         config: dict,
-        avg_loss: tuple,
+        avg_infoNCE_loss: tuple,
         neptune_run: neptune.Run
     ):
     
@@ -177,30 +172,23 @@ def ppo_round(
     ppo_epochs = config['ppo_update_epochs'] 
     ppo_batch_size = config['ppo_update_bs']
     
-    if config['ppo_decoder'] == 'with_input':
-        collect_trajectories = collect_trajectories_with_input
-        ppo_update = ppo_update_with_input
-    else:
-        raise NotImplementedError
-        
-    
     losses = []
     rewards = []
     
     tqdm_range = tqdm(range(ppo_rounds), desc='[ppo_round]')
     for round_ in tqdm_range:
     
-        trajectory, (img1, img2, new_img1, new_img2), entropy = collect_trajectories(
+        trajectory, (img1, img2, new_img1, new_img2), entropy = collect_trajectories_with_input(
             len_trajectory=len_trajectory,
             encoder=encoder,
             decoder=decoder,
-            avg_loss=avg_loss,
+            avg_infoNCE_loss=avg_infoNCE_loss,
             config=config,
             batch_size=batch_size,
             neptune_run=neptune_run
         )
 
-        loss = ppo_update(
+        loss = ppo_update_with_input(
             trajectory,
             decoder,
             optimizer,
@@ -229,7 +217,7 @@ def ppo_round(
 
 def contrastive_round(
         encoder: SimCLR,
-        decoder: DecoderNN_1input,
+        policies: list,
         optimizer: torch.optim.Optimizer,
         criterion: torch.nn.Module,
         random_p: float,
@@ -238,29 +226,16 @@ def contrastive_round(
         neptune_run: neptune.Run
     ):
     
-    num_steps = config['simclr_iterations'] 
     batch_size = config['simclr_bs']
     
-    train_loader = get_cifar10_dataloader(
-        num_steps=num_steps, 
-        batch_size=batch_size, 
-        encoder=encoder, 
-        decoder=decoder,
-        random_p=random_p,
-        spatial_only=False,
-    )
+    dist = get_policy_distribution(N=min(len(policies), 4), p=0.6)
+    print(f'policies dist: {dist}')
+    train_loader = get_cifar10_dataloader(batch_size, random_p, policies, dist)
     
-    tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[contrastive_round]')
-    
-    lr = None
-    
-    avg_rot_loss = []
-    avg_infoNCE_loss = []
-    
+    tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[contrastive_round]')    
     
     encoder.train()
-    
-    for it, ((org_x, x1, x2), y) in tqdm_train_loader:
+    for it, (x, x1, x2, y) in tqdm_train_loader:
         
         lr = adjust_learning_rate(epochs=config['epochs'],
             warmup_epochs=config['warmup_epochs'],
@@ -276,55 +251,18 @@ def contrastive_round(
 
         sim, _, simclr_loss = criterion(z1, z2, temperature=0.5)
         
-        
-        # Rotation prediction:
-        if config['rotation']:
-            rotated_x1, rotated_labels1 = rotate_images(x1)
-            rotated_x2, rotated_labels2 = rotate_images(x2)
-                        
-            rotated_x, rotated_labels = select_from_rotated_views(
-                rotated_x1, rotated_x2,
-                rotated_labels1, rotated_labels2
-            )
-                                
-            rotated_x = rotated_x.to(device)
-            rotated_labels = rotated_labels.to(device)
-            
-            
-            feature = encoder.enc(rotated_x)
-            feature = F.normalize(feature, dim=1) 
-            if config['rotation_detach']:
-                feature = feature.detach()
-            logits = encoder.predictor(feature)
-            rot_loss = F.cross_entropy(logits, rotated_labels)
-            
-            rot_acc = (logits.argmax(dim=-1) == rotated_labels).sum() / len(rotated_labels)
-                            
-        
         optimizer.zero_grad()
         simclr_loss.backward()
-        if config['rotation']: 
-            rot_loss.backward()
         optimizer.step()
 
         # logs:
         neptune_run["simclr/loss"].append(simclr_loss.item())
         neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
         neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
-        if config['rotation']:
-            neptune_run["simclr/rot_loss"].append(rot_loss.item())
-            neptune_run["simclr/rot_acc"].append(rot_acc.item())
         
-        if config['rotation']:
-            avg_rot_loss.append(rot_loss.item())
-        avg_infoNCE_loss.append(simclr_loss.item())
+        break
         
-    # avg_rot_loss = mean_last_percentage(avg_rot_loss, 0.5)
-    avg_rot_loss = 1
-    avg_infoNCE_loss = mean_last_percentage(avg_infoNCE_loss, 0.5)
-    
-    return avg_rot_loss, avg_infoNCE_loss
-
+        
 
 config = {
     'epochs':800,
@@ -335,24 +273,15 @@ config = {
     'linear_eval_epochs':200,
     'random_p':0.0,
     'encoder_backbone': 'resnet18', # ['resnet18', 'resnet50']
-    'lmbd': 0.0,
     'lr':0.03,
-    'rotation':False,
-    'rotation_detach':True,
-    
-    'augmentations':'ppo', # ['ppo', 'random']
-    
-    'ppo_decoder': 'with_input', # ['no_input', 'with_input']
-    'ppo_iterations':100,
+        
+    'ppo_iterations':200,
     'ppo_len_trajectory':128,
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
     'reward_a':1.3,
     'reward_b':0.2,
-    
-    'reward_rotation':'-1',
-    'reward_infoNCE':'1',
     
     'mode':'async', # ['async', 'debug']
     
@@ -366,30 +295,6 @@ config = {
     
 }
 
-
-def get_reward_function_formula(config):
-    formula = ""
-    if eval(config['reward_rotation']) != 0:
-        if eval(config['reward_rotation']) != 1:
-            formula += f"{config['reward_rotation']}*"
-        formula += "rot_loss"
-        formula += " + "
-    
-    if eval(config['reward_infoNCE']) != 0:
-        if eval(config['reward_infoNCE']) != 1:
-            formula += f"{config['reward_infoNCE']}*"
-        formula += "infoNCE"
-        formula += " + "
-        
-    if formula.endswith(' + '):
-        formula = formula[:-3]
-    
-    return formula.strip()
-
-
-
-# reward_formula = get_reward_function_formula(config)
-# print('reward function:', reward_formula)
 
 
 (
@@ -435,7 +340,7 @@ if config['checkpoint_params']:
     prev_run.stop()
 
 
-avg_loss = (1, 1)
+avg_infoNCE_loss = 1
 
 all_policies = []
 
@@ -445,36 +350,34 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
     # random_p = config['random_p']
     print(f'EPOCH:{epoch}    P:{random_p}')
-    
-    
+        
     
     if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
         
         avg_infoNCE_loss = get_avg_loss(
             encoder=encoder,
-            decoder=decoder,
+            policies=all_policies,
             criterion=simclr_criterion,
             random_p=random_p if (epoch-1) > config['warmup_epochs'] else 1,
             batch_size=config['ppo_collection_bs'],
             num_steps=20
         )
-        avg_loss = (1, avg_infoNCE_loss)
         print(f"avg_infoNCE: {avg_infoNCE_loss}")
-        
-        
+            
+            
         decoder, ppo_optimizer = ppo_init(config)
         trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
             encoder=encoder, 
             decoder=decoder,
             optimizer=ppo_optimizer,
             config=config,
-            avg_loss=avg_loss,
+            avg_infoNCE_loss=avg_infoNCE_loss,
             neptune_run=neptune_run
         )
         
         policy = decoder.get_policy_list()
         all_policies.append(policy)
-        
+            
         with open(f'{model_save_path}/all_policies.pkl', 'bw') as file:
             pickle.dump(all_policies, file)
     
@@ -483,7 +386,7 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     contrastive_round(
         encoder=encoder,
-        decoder=decoder,
+        policies=all_policies,
         epoch=epoch,
         config=config,
         optimizer=simclr_optimizer, 
@@ -518,6 +421,7 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
         neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
         neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
         neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
+        neptune_run["params/policies"].upload(f'{model_save_path}/all_policies.pkl')
 
 
 

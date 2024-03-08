@@ -7,15 +7,15 @@ import neptune
 
 
 from utils.datasets import (
-    get_cifar10_dataloader, 
-    rotate_images, 
+    get_cifar10_dataloader,
+    get_cifar10_raw_dataloader,
     plot_images_stacked,
-    select_from_rotated_views   
 )
 from utils.transforms import (
     get_transforms_list,
     apply_transformations,
-    NUM_DISCREATE
+    NUM_DISCREATE,
+    get_policy_distribution
 )
 from utils.contrastive import InfoNCELoss
 from utils.networks import SimCLR, DecoderNN_1input
@@ -75,19 +75,22 @@ def collect_trajectories_with_input(
         encoder: SimCLR,
         decoder: DecoderNN_1input,
         config: dict,
-        avg_loss: tuple,
+        avg_infoNCE_loss: float,
         batch_size: int,
         neptune_run: neptune.Run
     ):
 
     assert len_trajectory % batch_size == 0
-
-    avg_rot_loss, avg_infoNCE_loss = avg_loss
     
-    data_loader = get_cifar10_dataloader(
-        num_steps=len_trajectory // batch_size,
+    # data_loader = get_cifar10_dataloader(
+    #     num_steps=len_trajectory // batch_size,
+    #     batch_size=batch_size,
+    #     spatial_only=True,
+    # )
+    
+    data_loader = get_cifar10_raw_dataloader(
         batch_size=batch_size,
-        spatial_only=True,
+        num_steps=len_trajectory // batch_size
     )
     
     normalization = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
@@ -105,7 +108,6 @@ def collect_trajectories_with_input(
 
     
     mean_rewards = 0
-    mean_rot_reward = 0
     mean_strength = 0
     mean_entropy = 0
     mean_infonce_reward = 0 
@@ -140,49 +142,14 @@ def collect_trajectories_with_input(
         new_img1 = new_img1.to(device)
         new_img2 = new_img2.to(device)
         
-        rotation_reward = None
         infoNCE_reward = None
-        strength_reward = None
         
         encoder.eval()
         with torch.no_grad():
             _, new_z1 = encoder(new_img1)
             _, new_z2 = encoder(new_img2)
             
-            # rotated_x1, rotated_labels1 = rotate_images(new_img1)
-            # rotated_x2, rotated_labels2 = rotate_images(new_img2)
-            
-            # rotated_x, rotated_labels = select_from_rotated_views(
-            #     rotated_x1, rotated_x2,
-            #     rotated_labels1, rotated_labels2
-            # )            
-            
-            # rotated_x = rotated_x.to(device)
-            # rotated_labels = rotated_labels.to(device)
-            
-            # feature = encoder.enc(rotated_x)
-            # feature = F.normalize(feature, dim=1)
-            # logits = encoder.predictor(feature)
-            
-            # rot_loss = F.cross_entropy(logits, rotated_labels, reduce=False)
-            # rot_loss = rot_loss.reshape(-1, 4).mean(dim=-1)
-            
-            # predicttion = logits.argmax(dim=-1)
-            # rot_acc = 1. * (predicttion == rotated_labels)
-            # rot_acc = rot_acc.reshape(-1, 4).mean(dim=-1)
-            
-            
-                        
-
-        # strength_reward = get_transformations_strength(actions_index)
         infoNCE_reward = infonce_reward_function(new_z1, new_z2)
-        # rotation_reward = rot_loss / avg_rot_loss
-        
-        rot_loss_w = eval(config['reward_rotation'])
-        infonce_w = eval(config['reward_infoNCE'])
-        
-        # print(avg_rot_loss, avg_infoNCE_loss)
-        # reward = rot_loss_w*rotation_reward + infonce_w*infoNCE_reward
 
         a, b = config['reward_a'], config['reward_b']
         infoNCE_reward_avg = infoNCE_reward/avg_infoNCE_loss
@@ -195,12 +162,8 @@ def collect_trajectories_with_input(
         mean_rewards += reward.mean().item()
         mean_entropy += entropy.item()
         
-        if rotation_reward is not None:
-            mean_rot_reward += rotation_reward.mean().item()
         if infoNCE_reward is not None:
             mean_infonce_reward += infoNCE_reward.mean().item()
-        if strength_reward is not None:
-            mean_strength += strength_reward.mean().item()
 
     
     # string_transforms = []
@@ -211,19 +174,14 @@ def collect_trajectories_with_input(
     # print_sorted_strings_with_counts(string_transforms, topk=5)
         
     mean_rewards /= (len_trajectory // batch_size)
-    mean_rot_reward /= (len_trajectory // batch_size)
     mean_infonce_reward /= (len_trajectory // batch_size)
     mean_strength /= (len_trajectory // batch_size)
     mean_entropy /= (len_trajectory // batch_size)
     
     neptune_run["ppo/reward"].append(mean_rewards)
     neptune_run["ppo/mean_entropy"].append(mean_entropy)
-    if rotation_reward is not None:
-        neptune_run["ppo/rot_reward"].append(mean_rot_reward)
     if infoNCE_reward is not None:
         neptune_run["ppo/infonce_reward"].append(mean_infonce_reward)
-    if strength_reward is not None:
-        neptune_run["ppo/strength_reward"].append(mean_strength)
 
     # print('mean_entropy:', mean_entropy)
     

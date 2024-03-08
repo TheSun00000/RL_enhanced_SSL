@@ -245,6 +245,59 @@ class RandomAugmentation(object):
             
         return img
 
+class Augmentation(object):
+    def __init__(self, policies, dist):
+        
+        assert len(policies) != 0, 'policies should contain at least one policy'
+        assert np.isclose(sum(dist), 1), 'probabilities do not sum to 1'
+        assert len(policies) >= len(dist), 'len(policies) must be greater than len(dist)'
+        
+        self.policies = policies
+        self.dist = dist
+        
+        
+    
+    def get_policy(self, dist):
+        idx = np.random.choice(range(len(dist)), p=dist)
+        policy = self.policies[-(idx+1)]
+        return policy
+    
+    def __call__(self, img, branch=None):
+        
+        policy = self.get_policy(self.dist)
+        
+        img = img.copy()
+        subpolicy_1, subpolicy_2 = random.choice(policy)
+
+        if branch == 1:
+            subpolicy_1, _ = random.choice(policy)
+            img = img.copy()
+            for name, pr, lvl in subpolicy_1:
+                if random.random() < pr:
+                    img = apply_augment(img, name, lvl)
+            return img
+        
+        elif branch == 2:
+            _, subpolicy_2 = random.choice(policy)
+            img = img.copy()
+            for name, pr, lvl in subpolicy_2:
+                if random.random() < pr:
+                    img = apply_augment(img, name, lvl)
+            return img
+        
+        elif branch is None:
+            subpolicy_1, subpolicy_2 = random.choice(policy)
+            img1, img2 = img.copy(), img.copy()
+            
+            for name, pr, lvl in subpolicy_1:
+                if random.random() < pr:
+                    img1 = apply_augment(img1, name, lvl)
+            
+            for name, pr, lvl in subpolicy_2:
+                if random.random() < pr:
+                    img2 = apply_augment(img2, name, lvl)
+            
+            return img1, img2
 
 def apply_transformations(img1, transform_list):
         
@@ -263,6 +316,8 @@ def apply_transformations(img1, transform_list):
     
     return stored_imgs
 
-
+def get_policy_distribution(N, p):
+    return [p*(1-p)**n/(1-(1-p)**N) for n in range(N)]
+    
 
 

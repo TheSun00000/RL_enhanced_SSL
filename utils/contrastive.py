@@ -12,6 +12,7 @@ import numpy as np
 
 from utils.datasets2 import get_essl_memory_loader, get_essl_test_loader
 from utils.datasets import get_cifar10_dataloader
+from utils.transforms import get_policy_distribution
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
@@ -344,22 +345,16 @@ def eval_loop(encoder, ind=None):
 
 
 
-def get_avg_loss(encoder, decoder, criterion, random_p, batch_size, num_steps=10):
+def get_avg_loss(encoder, policies, criterion, random_p, batch_size, num_steps=10):
     
-    train_loader = get_cifar10_dataloader(
-        num_steps=num_steps, 
-        batch_size=batch_size, 
-        encoder=encoder, 
-        decoder=decoder,
-        random_p=random_p,
-        spatial_only=False,
-    )
+    dist = get_policy_distribution(N=min(len(policies), 4), p=0.6)
+    train_loader = get_cifar10_dataloader(batch_size, random_p, policies, dist)
     
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[get_average_infoNCE_loss]')
     avg_infoNCE_loss = []
     encoder.train()
     
-    for it, ((org_x, x1, x2), y) in tqdm_train_loader:
+    for it, (x, x1, x2, y) in tqdm_train_loader:
 
         # Simclr:
         _, z1 = encoder(x1.to(device))
@@ -368,5 +363,8 @@ def get_avg_loss(encoder, decoder, criterion, random_p, batch_size, num_steps=10
         _, _, simclr_loss = criterion(z1, z2, temperature=0.5)
         
         avg_infoNCE_loss.append(simclr_loss.item())
+        
+        if it == num_steps-1:
+            break
      
     return sum(avg_infoNCE_loss) / len(avg_infoNCE_loss)
