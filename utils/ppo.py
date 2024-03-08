@@ -175,7 +175,7 @@ def collect_trajectories_with_input(
                         
 
         # strength_reward = get_transformations_strength(actions_index)
-        infoNCE_reward = infonce_reward_function(new_z1, new_z2) / avg_infoNCE_loss
+        infoNCE_reward = infonce_reward_function(new_z1, new_z2)
         # rotation_reward = rot_loss / avg_rot_loss
         
         rot_loss_w = eval(config['reward_rotation'])
@@ -185,7 +185,8 @@ def collect_trajectories_with_input(
         # reward = rot_loss_w*rotation_reward + infonce_w*infoNCE_reward
 
         a, b = config['reward_a'], config['reward_b']
-        reward = torch.where(infoNCE_reward <= a, infoNCE_reward, (-a/b)*(infoNCE_reward-(a+b)))
+        infoNCE_reward_avg = infoNCE_reward/avg_infoNCE_loss
+        reward = torch.where(infoNCE_reward_avg <= a, infoNCE_reward_avg, (-a/b)*(infoNCE_reward_avg-(a+b)))
         
         stored_log_p[begin:end] = log_p.detach().cpu()
         stored_actions_index += actions_index

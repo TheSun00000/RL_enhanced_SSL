@@ -348,7 +348,7 @@ config = {
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
-    'reward_a':1.01,
+    'reward_a':1.3,
     'reward_b':0.2,
     
     'reward_rotation':'-1',
@@ -359,10 +359,10 @@ config = {
     'model_save_path':model_save_path,
     'seed':seed,
     
-    'checkpoint_id':"",
-    'checkpoint_params':"",
-    # 'checkpoint_id':"SIM-323",
-    # 'checkpoint_params':'params_433',
+    # 'checkpoint_id':"",
+    # 'checkpoint_params':"",
+    'checkpoint_id':"SIM-495",
+    'checkpoint_params':'params_626',
     
 }
 
@@ -449,6 +449,19 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     
     if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
+        
+        avg_infoNCE_loss = get_avg_loss(
+            encoder=encoder,
+            decoder=decoder,
+            criterion=simclr_criterion,
+            random_p=random_p if (epoch-1) > config['warmup_epochs'] else 1,
+            batch_size=config['ppo_collection_bs'],
+            num_steps=20
+        )
+        avg_loss = (1, avg_infoNCE_loss)
+        print(f"avg_infoNCE: {avg_infoNCE_loss}")
+        
+        
         decoder, ppo_optimizer = ppo_init(config)
         trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
             encoder=encoder, 
@@ -468,7 +481,7 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     
     
-    avg_rot_loss, avg_infoNCE_loss = contrastive_round(
+    contrastive_round(
         encoder=encoder,
         decoder=decoder,
         epoch=epoch,
@@ -479,23 +492,9 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
         neptune_run=neptune_run
     )
     
-    if ((epoch+1) > config['warmup_epochs']) and ((epoch) % 10 == 0): 
-        avg_infoNCE_loss = get_avg_loss(
-            encoder=encoder,
-            decoder=decoder,
-            criterion=simclr_criterion,
-            random_p=random_p,
-            batch_size=config['ppo_collection_bs'],
-            num_steps=10
-        )
-        avg_loss = (1, avg_infoNCE_loss)
-    
-        
-    print(f'bs: {config['ppo_collection_bs']} | avg_infoNCE: {avg_infoNCE_loss}')
 
     if epoch % 1 == 0:
         test_acc = knn_evaluation(encoder)
-    
     neptune_run["linear_eval/test_acc"] .append(test_acc)
 
     
