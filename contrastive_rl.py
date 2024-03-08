@@ -8,6 +8,7 @@ import random
 import math
 import copy
 import neptune
+import pickle
 
 from utils.datasets import (
     get_cifar10_dataloader, 
@@ -15,7 +16,7 @@ from utils.datasets import (
     select_from_rotated_views,
 )
 from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50
-from utils.contrastive import InfoNCELoss, knn_evaluation, top_k_accuracy, eval_loop
+from utils.contrastive import InfoNCELoss, knn_evaluation, top_k_accuracy, eval_loop, get_avg_loss
 from utils.ppo import (
     collect_trajectories_with_input,
     ppo_update_with_input,
@@ -436,6 +437,9 @@ if config['checkpoint_params']:
 
 avg_loss = (1, 1)
 
+all_policies = []
+
+
 for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     
     random_p = 1 if epoch <= config['warmup_epochs'] else config['random_p']
@@ -454,6 +458,13 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
             avg_loss=avg_loss,
             neptune_run=neptune_run
         )
+        
+        policy = decoder.get_policy_list()
+        all_policies.append(policy)
+        
+        with open(f'{model_save_path}/all_policies.pkl', 'bw') as file:
+            pickle.dump(all_policies, file)
+    
     
     
     
@@ -468,10 +479,19 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
         neptune_run=neptune_run
     )
     
-    avg_loss = (avg_rot_loss, avg_infoNCE_loss)
+    if ((epoch+1) > config['warmup_epochs']) and ((epoch) % 10 == 0): 
+        avg_infoNCE_loss = get_avg_loss(
+            encoder=encoder,
+            decoder=decoder,
+            criterion=simclr_criterion,
+            random_p=random_p,
+            batch_size=config['ppo_collection_bs'],
+            num_steps=10
+        )
+        avg_loss = (1, avg_infoNCE_loss)
     
-    print('avg_rot_loss:', avg_rot_loss)
-    print('avg_infoNCE_loss:', avg_infoNCE_loss)
+        
+    print(f'bs: {config['ppo_collection_bs']} | avg_infoNCE: {avg_infoNCE_loss}')
 
     if epoch % 1 == 0:
         test_acc = knn_evaluation(encoder)

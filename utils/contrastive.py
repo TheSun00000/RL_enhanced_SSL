@@ -11,6 +11,7 @@ import math
 import numpy as np
 
 from utils.datasets2 import get_essl_memory_loader, get_essl_test_loader
+from utils.datasets import get_cifar10_dataloader
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
@@ -340,3 +341,32 @@ def eval_loop(encoder, ind=None):
             print(line_to_print)
 
     return accuracy
+
+
+
+def get_avg_loss(encoder, decoder, criterion, random_p, batch_size, num_steps=10):
+    
+    train_loader = get_cifar10_dataloader(
+        num_steps=num_steps, 
+        batch_size=batch_size, 
+        encoder=encoder, 
+        decoder=decoder,
+        random_p=random_p,
+        spatial_only=False,
+    )
+    
+    tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[get_average_infoNCE_loss]')
+    avg_infoNCE_loss = []
+    encoder.train()
+    
+    for it, ((org_x, x1, x2), y) in tqdm_train_loader:
+
+        # Simclr:
+        _, z1 = encoder(x1.to(device))
+        _, z2 = encoder(x2.to(device))
+
+        _, _, simclr_loss = criterion(z1, z2, temperature=0.5)
+        
+        avg_infoNCE_loss.append(simclr_loss.item())
+     
+    return sum(avg_infoNCE_loss) / len(avg_infoNCE_loss)

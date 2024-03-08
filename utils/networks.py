@@ -4,10 +4,19 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 from utils.resnet import resnet18, resnet50
 from itertools import permutations
+from collections import Counter
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device
 
+
+
+
+def count_occurrences(list_of_lists):
+    counts = Counter(tuple(sublist) for sublist in list_of_lists)
+    counts = [(list(sublist), count) for sublist, count in counts.items()]
+    counts = sorted(counts, key=lambda x:x[1], reverse=True)
+    return counts
 
 
 class SimCLR(nn.Module):
@@ -410,4 +419,7 @@ class DecoderNN_1input(nn.Module):
             action,
             entropy
         )
-  
+    
+    def get_policy_list(self, N=20000):
+        _, policy, _ = self.forward(N)
+        return policy
