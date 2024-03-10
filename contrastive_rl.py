@@ -235,6 +235,7 @@ def contrastive_round(
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[contrastive_round]')    
     
     encoder.train()
+    lr = None
     for it, (x, x1, x2, y) in tqdm_train_loader:
         
         lr = adjust_learning_rate(epochs=config['epochs'],
@@ -259,10 +260,9 @@ def contrastive_round(
         neptune_run["simclr/loss"].append(simclr_loss.item())
         neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
         neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
-        
-        break
-        
-        
+                
+    print('epoch:', epoch, 'lr:', lr)
+    
 
 config = {
     'epochs':800,
@@ -271,16 +271,16 @@ config = {
     'simclr_iterations':'all',
     'simclr_bs':512,
     'linear_eval_epochs':200,
-    'random_p':0.0,
-    'encoder_backbone': 'resnet18', # ['resnet18', 'resnet50']
+    'random_p':1.0,
+    'encoder_backbone': 'resnet50', # ['resnet18', 'resnet50']
     'lr':0.03,
         
-    'ppo_iterations':200,
+    'ppo_iterations':100,
     'ppo_len_trajectory':128,
     'ppo_collection_bs':128,
     'ppo_update_bs':16,
     'ppo_update_epochs':4,
-    'reward_a':1.3,
+    'reward_a':1.4,
     'reward_b':0.2,
     
     'mode':'async', # ['async', 'debug']
@@ -288,11 +288,10 @@ config = {
     'model_save_path':model_save_path,
     'seed':seed,
     
-    # 'checkpoint_id':"",
-    # 'checkpoint_params':"",
-    'checkpoint_id':"SIM-495",
-    'checkpoint_params':'params_626',
-    
+    'checkpoint_id':"",
+    'checkpoint_params':"",
+    # 'checkpoint_id':"SIM-511",
+    # 'checkpoint_params':'params_655',
 }
 
 
@@ -304,7 +303,7 @@ config = {
 
 
 
-logs_tags = ['random_p', 'model_save_path', 'reward_a', 'reward_b']
+logs_tags = ['random_p', 'model_save_path', 'reward_a', 'reward_b', 'encoder_backbone', 'lr']
 neptune_run = init_neptune(
     tags=[f'{k}={config[k]}' for (k) in logs_tags],
     mode=config['mode']
@@ -352,34 +351,34 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
     print(f'EPOCH:{epoch}    P:{random_p}')
         
     
-    if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
+    # if (epoch > config['warmup_epochs']) and ((epoch-1) % 10 == 0):
         
-        avg_infoNCE_loss = get_avg_loss(
-            encoder=encoder,
-            policies=all_policies,
-            criterion=simclr_criterion,
-            random_p=random_p if (epoch-1) > config['warmup_epochs'] else 1,
-            batch_size=config['ppo_collection_bs'],
-            num_steps=20
-        )
-        print(f"avg_infoNCE: {avg_infoNCE_loss}")
+    #     avg_infoNCE_loss = get_avg_loss(
+    #         encoder=encoder,
+    #         policies=all_policies,
+    #         criterion=simclr_criterion,
+    #         random_p=random_p if (epoch-1) > config['warmup_epochs'] else 1,
+    #         batch_size=config['ppo_collection_bs'],
+    #         num_steps=20
+    #     )
+    #     print(f"avg_infoNCE: {avg_infoNCE_loss}")
             
             
-        decoder, ppo_optimizer = ppo_init(config)
-        trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
-            encoder=encoder, 
-            decoder=decoder,
-            optimizer=ppo_optimizer,
-            config=config,
-            avg_infoNCE_loss=avg_infoNCE_loss,
-            neptune_run=neptune_run
-        )
+    #     decoder, ppo_optimizer = ppo_init(config)
+    #     trajectory, (img1, img2, new_img1, new_img2), entropy, (ppo_losses, ppo_rewards) = ppo_round(
+    #         encoder=encoder, 
+    #         decoder=decoder,
+    #         optimizer=ppo_optimizer,
+    #         config=config,
+    #         avg_infoNCE_loss=avg_infoNCE_loss,
+    #         neptune_run=neptune_run
+    #     )
         
-        policy = decoder.get_policy_list()
-        all_policies.append(policy)
+    #     policy = decoder.get_policy_list()
+    #     all_policies.append(policy)
             
-        with open(f'{model_save_path}/all_policies.pkl', 'bw') as file:
-            pickle.dump(all_policies, file)
+    #     with open(f'{model_save_path}/all_policies.pkl', 'bw') as file:
+    #         pickle.dump(all_policies, file)
     
     
     
@@ -408,7 +407,11 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
         torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/epoch_{epoch}/encoder_opt.pt')
         torch.save(decoder.state_dict(), f'{model_save_path}/epoch_{epoch}/decoder.pt')
         torch.save(ppo_optimizer.state_dict(), f'{model_save_path}/epoch_{epoch}/decoder_opt.pt')
-    
+        
+        neptune_run[f"params/epoch_{epoch}/encoder"].upload(f'{model_save_path}/epoch_{epoch}/encoder.pt')
+        neptune_run[f"params/epoch_{epoch}/encoder_opt"].upload(f'{model_save_path}/epoch_{epoch}/encoder_opt.pt')
+        neptune_run[f"params/epoch_{epoch}/decoder"].upload(f'{model_save_path}/epoch_{epoch}/decoder.pt')
+        neptune_run[f"params/epoch_{epoch}/decoder_opt"].upload(f'{model_save_path}/epoch_{epoch}/decoder_opt.pt')
     
     
     if (epoch % 10 == 0) or (epoch == config['epochs']):
@@ -421,7 +424,8 @@ for epoch in tqdm(range(start_epoch, config['epochs']+1), desc='[Main Loop]'):
         neptune_run["params/encoder_opt"].upload(f'{model_save_path}/encoder_opt.pt')
         neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
         neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
-        neptune_run["params/policies"].upload(f'{model_save_path}/all_policies.pkl')
+        if all_policies:
+            neptune_run["params/policies"].upload(f'{model_save_path}/all_policies.pkl')
 
 
 

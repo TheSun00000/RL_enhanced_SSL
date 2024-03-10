@@ -153,7 +153,7 @@ class MyDatset(Dataset):
         self.policies = policies
         self.random_p = random_p
         
-        self.random_policy = RandomAugmentation(N=2, pr=0.8)
+        self.random_policy = RandomAugmentation(N=3, pr=0.8)
         self.ppo_policy = None
         if random_p != 1:
             self.ppo_policy = Augmentation(policies, dist=ppo_dist)
