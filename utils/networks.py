@@ -22,6 +22,9 @@ def count_occurrences(list_of_lists):
 class SimCLR(nn.Module):
     def __init__(self, backbone):
         super(SimCLR, self).__init__()
+        
+        self.backbone = backbone
+        
         if backbone == 'resnet18':
             self.enc = resnet18()
             self.feature_dim = 512
@@ -29,7 +32,7 @@ class SimCLR(nn.Module):
             self.enc = resnet50()
             self.feature_dim = 2048
         else:
-            raise     
+            raise NotImplementedError  
             
         
                 

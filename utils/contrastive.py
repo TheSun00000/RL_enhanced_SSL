@@ -10,8 +10,7 @@ import math
 
 import numpy as np
 
-from utils.datasets2 import get_essl_memory_loader, get_essl_test_loader
-from utils.datasets import get_cifar10_dataloader
+from utils.datasets import get_dataloader, get_knn_evaluation_loader, get_linear_evaluation_loader
 from utils.transforms import get_policy_distribution
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -147,9 +146,15 @@ class FeaturesDataset:
 # test using a knn monitor
 def knn_monitor(net, memory_data_loader, test_data_loader, device='cuda', k=200, t=0.1, targets=None):
     if not targets:
-        targets = memory_data_loader.dataset.targets
+        if 'targets' in memory_data_loader.dataset.__dir__():
+            targets = memory_data_loader.dataset.targets
+        elif 'labels' in memory_data_loader.dataset.__dir__():
+            targets = memory_data_loader.dataset.labels
+        else:
+            raise NotImplementedError
+        
     net.eval()
-    classes = len(memory_data_loader.dataset.classes)
+    classes = len(np.unique(targets))
     total_top1, total_top5, total_num, feature_bank = 0.0, 0.0, 0, []
     with torch.no_grad():
         # generate feature bank
@@ -201,7 +206,7 @@ def knn_predict(feature, feature_bank, feature_labels, classes, knn_k, knn_t):
     return pred_labels         
 
 
-def knn_evaluation(encoder):
+def knn_evaluation(encoder, args):
     
     # simple_transform = transforms.Compose([
     #     transforms.ToTensor(),
@@ -214,8 +219,8 @@ def knn_evaluation(encoder):
     # train_loader = DataLoader(linear_eval_train_dataset, batch_size=1024, shuffle=False)
     # test_loader = DataLoader(linear_eval_test_dataset, batch_size=1024, shuffle=False)
     
-    memory_loader = get_essl_memory_loader()
-    test_loader = get_essl_test_loader()
+    
+    memory_loader, test_loader = get_knn_evaluation_loader(args.dataset, batch_size=512)
     
     acc = knn_monitor(
         encoder.enc,
@@ -243,36 +248,20 @@ def top_k_accuracy(sim, k):
 
 
 
-def eval_loop(encoder, ind=None):
-    # dataset
-    train_transform = T.Compose([
-        T.RandomResizedCrop(32, interpolation=T.InterpolationMode.BICUBIC),
-        T.RandomHorizontalFlip(),
-        T.ToTensor(),
-        T.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
-    ])
-    test_transform = T.Compose([
-        T.Resize(36, interpolation=T.InterpolationMode.BICUBIC),
-        T.CenterCrop(32),
-        T.ToTensor(),
-        T.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
-    ])
-
-    train_loader = torch.utils.data.DataLoader(
-        dataset=torchvision.datasets.CIFAR10('./dataset/', train=True, transform=train_transform, download=True),
-        shuffle=True,
-        batch_size=256,
-        pin_memory=True,
-        drop_last=True
-    )
-    test_loader = torch.utils.data.DataLoader(
-        dataset=torchvision.datasets.CIFAR10('./dataset/', train=False, transform=test_transform, download=True),
-        shuffle=False,
-        batch_size=256,
-        pin_memory=True,
-    )
-
-    classifier = nn.Linear(512, 10).cuda()
+def eval_loop(encoder, args, ind=None):
+    
+    
+    train_loader, test_loader = get_linear_evaluation_loader(args.dataset, batch_size=256)
+    
+    
+    if len(encoder.layer4) == 2: # resnet18
+        feature_dim = 512
+    elif len(encoder.layer4) == 3: # resnet50
+        feature_dim = 2048
+    else:
+        raise NotImplementedError
+    
+    classifier = nn.Linear(feature_dim, 10).cuda()
     # optimization
     optimizer = torch.optim.SGD(
         classifier.parameters(),
@@ -345,10 +334,17 @@ def eval_loop(encoder, ind=None):
 
 
 
-def get_avg_loss(encoder, policies, criterion, random_p, batch_size, num_steps=10):
+def get_avg_loss(encoder, policies, criterion, random_p, batch_size, args, num_steps=10):
     
     dist = get_policy_distribution(N=min(len(policies), 4), p=0.6)
-    train_loader = get_cifar10_dataloader(batch_size, random_p, policies, dist)
+    # train_loader = get_cifar10_dataloader(batch_size, random_p, policies, dist)
+    train_loader = get_dataloader(
+        dataset_name=args.dataset,
+        batch_size=batch_size,
+        random_p=random_p,
+        policies=policies,
+        ppo_dist=dist
+    )
     
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[get_average_infoNCE_loss]')
     avg_infoNCE_loss = []

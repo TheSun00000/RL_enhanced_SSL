@@ -6,11 +6,7 @@ import neptune
 
 
 
-from utils.datasets import (
-    get_cifar10_dataloader,
-    get_cifar10_raw_dataloader,
-    plot_images_stacked,
-)
+from utils.datasets import get_dataloader
 from utils.transforms import (
     get_transforms_list,
     apply_transformations,
@@ -74,7 +70,7 @@ def collect_trajectories_with_input(
         len_trajectory: int,
         encoder: SimCLR,
         decoder: DecoderNN_1input,
-        config: dict,
+        args,
         avg_infoNCE_loss: float,
         batch_size: int,
         neptune_run: neptune.Run
@@ -82,18 +78,12 @@ def collect_trajectories_with_input(
 
     assert len_trajectory % batch_size == 0
     
-    # data_loader = get_cifar10_dataloader(
-    #     num_steps=len_trajectory // batch_size,
-    #     batch_size=batch_size,
-    #     spatial_only=True,
-    # )
-    
-    data_loader = get_cifar10_raw_dataloader(
+    data_loader = get_dataloader(
+        dataset_name=args.dataset,
         batch_size=batch_size,
-        num_steps=len_trajectory // batch_size
+        transform=False,
     )
     
-    normalization = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
     last_transform = transforms.Compose([
             transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
             transforms.RandomHorizontalFlip(p=0.5),
@@ -116,8 +106,12 @@ def collect_trajectories_with_input(
     for i in range(len_trajectory // batch_size):
 
         begin, end = i*batch_size, (i+1)*batch_size
-
-        img, y = next(data_loader_iterator)
+        
+        try:
+            img, y = next(data_loader_iterator)
+        except StopIteration:
+            iterator = iter(data_loader)
+            img, y = next(iterator)
 
         with torch.no_grad():
             log_p, actions_index, entropy = decoder(batch_size=batch_size)
@@ -151,7 +145,7 @@ def collect_trajectories_with_input(
             
         infoNCE_reward = infonce_reward_function(new_z1, new_z2)
 
-        a, b = config['reward_a'], config['reward_b']
+        a, b = args.reward_a, args.reward_b
         infoNCE_reward_avg = infoNCE_reward/avg_infoNCE_loss
         reward = torch.where(infoNCE_reward_avg <= a, infoNCE_reward_avg, (-a/b)*(infoNCE_reward_avg-(a+b)))
         

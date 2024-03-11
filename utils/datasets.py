@@ -29,12 +29,15 @@ def denormalize(tensor, mean, std):
 
 
 def plot_images_stacked(tensor1, tensor2):
+    
+    _, _, h, w = tensor1.shape
+    
     tensor1 = tensor1.cpu()
     tensor2 = tensor2.cpu()
     # Check if the input tensors have the correct shape
-    expected_shape = (3, 32, 32)
+    expected_shape = (3, h, h)
     if tensor1.shape[1:] != expected_shape or tensor2.shape[1:] != expected_shape:
-        raise ValueError("Input tensors must have shape (N, 3, 32, 32)")
+        raise ValueError("Input tensors must have shape (N, 3, H, W)")
 
     # Denormalize tensors
     mean = [0.4914, 0.4822, 0.4465]
@@ -60,53 +63,6 @@ def plot_images_stacked(tensor1, tensor2):
     plt.show()
 
 
-def rotate_images(images):
-    nimages = images.shape[0]
-    n_rot_images = 4 * nimages
-
-    # rotate images all 4 ways at once
-    rotated_images = torch.zeros([nimages, 4, images.shape[1], images.shape[2], images.shape[3]])
-    rot_classes = torch.zeros([nimages, 4]).long()
-
-    rotated_images[:, 0] = images
-    # rotate 90
-    rotated_images[:, 1] = images.flip(3).transpose(2, 3)
-    rot_classes[:, 1] = 1
-    # rotate 180
-    rotated_images[:, 2] = images.flip(3).flip(2)
-    rot_classes[:, 2] = 2
-    # rotate 270
-    rotated_images[:, 3] = images.transpose(2, 3).flip(3)
-    rot_classes[:, 3] = 3
-
-    rotated_images = rotated_images.reshape(-1, images.shape[1], images.shape[2], images.shape[3])
-    rot_classes = rot_classes.reshape(-1)
-    
-    return rotated_images, rot_classes
-
-
-def select(list, ids):
-    return [list[i] for i in ids]
-
-
-
-cifar10_dataset = torchvision.datasets.CIFAR10('dataset', download=True)
-
-    
-    
-
-class MyRawDatset(Dataset):
-    def __init__(self, train_dataset):
-        self.train_dataset = train_dataset
-
-    def __len__(self,):
-        return len(self.train_dataset)
-    
-    def __getitem__(self, i):
-        img, y = self.train_dataset[i][0], self.train_dataset[i][1]
-        return img, y
-
-
 def MyRawDatset_collate_fn(imgs_y):
     imgs, targets = [], []
     for img, y in imgs_y:
@@ -117,52 +73,25 @@ def MyRawDatset_collate_fn(imgs_y):
     return imgs, targets
 
 
-class DataLoaderWrapper:
-    def __init__(self, dataloder, steps):
-        self.steps = steps
-        self.dataloder = dataloder
-    
-    def __len__(self):
-        if self.steps in ['all', -1]:
-            return len(self.dataloder)
-        else:
-            return self.steps
-    
-    def __iter__(self):
-                
-        iterator = iter(self.dataloder)
-        if not self.steps in ['all', -1]:
-            for i in range(self.steps):
-                try:
-                    x, y = next(iterator)
-                except StopIteration:
-                    iterator = iter(self.dataloder)
-                    x, y = next(iterator)
-                yield x, y
-                
-        else: # self.steps in ['all', -1]
-            for x, y in iterator:
-                yield x, y
-          
-
-
-
 class MyDatset(Dataset):
-    def __init__(self, train_dataset, policies, random_p, ppo_dist):
+    def __init__(self, train_dataset, policies=[], random_p=1, ppo_dist=[], transform=True, normalize=None, random_resized_crop=None):
+                
         self.train_dataset = train_dataset
         self.policies = policies
         self.random_p = random_p
+        self.ppo_dist = ppo_dist
+        self.transform = transform
         
-        self.random_policy = RandomAugmentation(N=3, pr=0.8)
+        self.random_policy = RandomAugmentation(N=2, pr=0.8)
         self.ppo_policy = None
         if random_p != 1:
             self.ppo_policy = Augmentation(policies, dist=ppo_dist)
         
         self.last_transform = transforms.Compose([
-            transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
+            random_resized_crop,
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.ToTensor(),
-            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+            normalize
         ])
 
 
@@ -171,6 +100,10 @@ class MyDatset(Dataset):
     
     def __getitem__(self, i):
         img, y = self.train_dataset[i][0], self.train_dataset[i][1]
+        
+        if not self.transform:
+            return img, y
+        
         img1, img2 = img.copy(), img.copy()
         
         img1_is_random = random.random() < self.random_p
@@ -200,43 +133,166 @@ class MyDatset(Dataset):
 
 
 
-
-
-def get_cifar10_dataloader(batch_size, random_p, all_policies, ppo_dist):
+def get_dataloader(dataset_name, batch_size, policies=[], random_p=1, ppo_dist=[], transform=True):        
     
-    dataset = MyDatset(cifar10_dataset, all_policies, random_p, ppo_dist)
-    data_loader = DataLoader(dataset, batch_size=batch_size, drop_last=True, shuffle=True)
-
-    return data_loader
-
-def get_cifar10_raw_dataloader(num_steps, batch_size):
-    
-    dataset = MyRawDatset(cifar10_dataset)
-    data_loader = DataLoader(dataset, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=MyRawDatset_collate_fn)
-    data_loader = DataLoaderWrapper(data_loader, num_steps)
-
-    return data_loader
-
-
-def select_from_rotated_views(rotated_x1, rotated_x2, rotated_labels1, rotated_labels2):
-    
-    
-    batch_size = rotated_x1.shape[0] // 4
-    
-    # Select images from both img1 and img2
-    rotated_x1, rotated_x2 = rotated_x1.reshape(-1, 4, 3, 32, 32), rotated_x2.reshape(-1, 4, 3, 32, 32)
-    rotated_labels1, rotated_labels2 = rotated_labels1.reshape(-1, 4), rotated_labels2.reshape(-1, 4)
+    if dataset_name in ['cifar10', 'svhn'] :
+        normalize = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        random_resized_crop = transforms.RandomResizedCrop(32, scale=(0.2, 1.))
         
-    rotated_x = torch.concat((rotated_x1, rotated_x2), dim=1)
-    rotated_labels = torch.concat((rotated_labels1, rotated_labels2), dim=1)
+        if dataset_name == 'cifar10':
+            dataset = torchvision.datasets.CIFAR10('./dataset/')
+        elif dataset_name == 'svhn':
+            dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='train')
+        
+        dataset = MyDatset(
+            train_dataset=dataset,
+            policies=policies,
+            random_p=random_p,
+            ppo_dist=ppo_dist,
+            transform=transform,
+            normalize=normalize,
+            random_resized_crop=random_resized_crop)
+        
+
+    elif dataset_name == 'TinyImagenet':
+        normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        random_resized_crop = transforms.RandomResizedCrop(64, scale=(0.2, 1.))
+
+        dataset = MyDatset(
+            train_dataset=torchvision.datasets.ImageFolder('dataset/tiny-imagenet-200/train'),
+            policies=policies,
+            random_p=random_p,
+            ppo_dist=ppo_dist,
+            transform=transform,
+            normalize=normalize,
+            random_resized_crop=random_resized_crop
+        )
     
-    selected_idx = torch.zeros((batch_size, 4), dtype=torch.long)
-    for i in range(batch_size):
-        selected_idx[i] = torch.randperm(8)[:4]
-    rotated_x = rotated_x[torch.arange(batch_size).unsqueeze(1), selected_idx]
-    rotated_labels = rotated_labels[torch.arange(batch_size).unsqueeze(1), selected_idx]
     
-    rotated_x, rotated_labels = rotated_x.reshape(-1, 3, 32, 32), rotated_labels.reshape(-1)            
+    data_loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        drop_last=True,
+        shuffle=True,
+        collate_fn=None if transform else MyRawDatset_collate_fn,
+        pin_memory=True
+    )
+
+    
+    return data_loader
+
+
+
+
+def get_knn_evaluation_loader(dataset_name, batch_size=512):
+    
+    if dataset_name in ['cifar10', 'svhn']:
+        single_transform = transforms.Compose([
+            transforms.ToTensor(), 
+            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        ])
+
+        if dataset_name == 'cifar10':
+            train_dataset = torchvision.datasets.CIFAR10('./dataset', train=True, transform=single_transform)
+            test_dataset = torchvision.datasets.CIFAR10('./dataset', train=False, transform=single_transform)
+        elif dataset_name == 'svhn':
+            train_dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='train', transform=single_transform)
+            test_dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='test', transform=single_transform)
     
     
-    return rotated_x, rotated_labels
+    elif dataset_name == 'TinyImagenet':
+        single_transform = transforms.Compose([
+            # transforms.Resize(32),
+            transforms.ToTensor(), 
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+
+        train_dataset = torchvision.datasets.ImageFolder('./dataset/tiny-imagenet-200/train', transform=single_transform)
+        test_dataset = torchvision.datasets.ImageFolder('./dataset/tiny-imagenet-200/val/images', transform=single_transform)
+        
+        
+        
+    
+    memory_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        shuffle=False,
+        batch_size=batch_size,
+        pin_memory=True,
+        num_workers=1
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        shuffle=False,
+        batch_size=batch_size,
+        pin_memory=True,
+        num_workers=1
+    )
+        
+    return memory_loader, test_loader
+
+
+
+def get_linear_evaluation_loader(dataset_name, batch_size):
+    
+    if dataset_name in ['cifar10', 'svhn']:
+
+        train_transform = transforms.Compose([
+            transforms.RandomResizedCrop(32, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        ])
+        
+        test_transform = transforms.Compose([
+            transforms.Resize(36, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.CenterCrop(32),
+            transforms.ToTensor(),
+            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        ])
+
+        if dataset_name == 'cifar10':
+            train_dataset = torchvision.datasets.CIFAR10('./dataset', train=True, transform=train_transform)
+            test_dataset = torchvision.datasets.CIFAR10('./dataset', train=False, transform=test_transform)
+        elif dataset_name == 'svhn':
+            train_dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='train', transform=train_transform)
+            test_dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='test', transform=test_transform)
+    
+
+    
+    elif dataset_name == 'TinyImagenet':
+        train_transform = transforms.Compose([
+            transforms.RandomResizedCrop(64, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        ])
+        
+        test_transform = transforms.Compose([
+            transforms.Resize(72, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.CenterCrop(64),
+            transforms.ToTensor(),
+            transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
+        ])
+
+        train_dataset = torchvision.datasets.ImageFolder('./dataset/tiny-imagenet-200/train', transform=train_transform)
+        test_dataset = torchvision.datasets.ImageFolder('./dataset/tiny-imagenet-200/val/images', transform=test_transform)
+        
+        
+        
+    
+    memory_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        shuffle=False,
+        batch_size=batch_size,
+        pin_memory=True,
+        num_workers=1
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        shuffle=False,
+        batch_size=batch_size,
+        pin_memory=True,
+        num_workers=1
+    )
+        
+    return memory_loader, test_loader
