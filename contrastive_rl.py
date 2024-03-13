@@ -11,7 +11,7 @@ import neptune
 import pickle
 
 from utils.datasets import get_dataloader, plot_images_stacked
-from utils.networks import SimCLR, DecoderNN_1input, build_resnet18, build_resnet50
+from utils.networks import SimCLR, DecoderNN_1input, DecoderNN_1input_one_branch, build_resnet18, build_resnet50
 from utils.contrastive import InfoNCELoss, knn_evaluation, top_k_accuracy, eval_loop, get_avg_loss
 from utils.ppo import (
     collect_trajectories_with_input,
@@ -67,11 +67,20 @@ def mean_last_percentage(lst, P):
 
 def ppo_init(args, device):
 
-    decoder = DecoderNN_1input(
-        transforms=list(transformations_dict.keys()),
-        num_discrete_magnitude=NUM_DISCREATE,
-        device=device
-    )
+    if args.two_branches:
+        decoder = DecoderNN_1input(
+            transforms=list(transformations_dict.keys()),
+            num_discrete_magnitude=NUM_DISCREATE,
+            device=device,
+            use_proba_head=args.proba_head
+        )
+    else:
+        decoder = DecoderNN_1input_one_branch(
+            transforms=list(transformations_dict.keys()),
+            num_discrete_magnitude=NUM_DISCREATE,
+            device=device,
+            use_proba_head=args.proba_head
+        )
     
     decoder = decoder.to(device)
     
@@ -432,6 +441,8 @@ if __name__ == "__main__":
     parser.add_argument('--ppo_update_epochs', type=int, default=4, help='Number of epochs for PPO update')
     parser.add_argument('--reward_a', type=float, default=1.4, help='Reward parameter a for PPO')
     parser.add_argument('--reward_b', type=float, default=0.2, help='Reward parameter b for PPO')
+    parser.add_argument('--proba_head', type=bool, default=True)
+    parser.add_argument('--two_branches', type=bool, default=True)
 
     parser.add_argument('--mode', type=str, default='async', choices=['async', 'debug'], help='Training mode')
 
@@ -459,6 +470,9 @@ if __name__ == "__main__":
         
     args.reward_a = 1.4
     args.reward_b = 0.2
+    
+    args.proba_head = True
+    args.two_branches = False
 
     args.mode = 'async' # ['async', 'debug']
 
