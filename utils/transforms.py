@@ -9,7 +9,7 @@ import PIL
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device
 
-NUM_DISCREATE = 10
+NUM_DISCREATE = 11
 RANDOM_TRANSFORMATION = False
 MAX_STENGTH = 0.5
 

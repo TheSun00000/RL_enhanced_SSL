@@ -286,7 +286,7 @@ def eval_loop(encoder, args, ind=None):
         return lr
 
     # training
-    for e in range(1, 101):
+    for e in tqdm(range(1, 101)):
         # declaring train
         classifier.train()
         encoder.eval()

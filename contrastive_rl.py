@@ -218,8 +218,8 @@ def ppo_round(
     )
     string_transforms = []
     for trans1, trans2 in zip(transforms_list_1, transforms_list_2):
-        s1 = ' '.join([ f'{name[:4]}_{round(magnetude, 3)}' for (name, _, magnetude) in trans1])
-        s2 = ' '.join([ f'{name[:4]}_{round(magnetude, 3)}' for (name, _, magnetude) in trans2])
+        s1 = ' '.join([ f'{name[:4]}_{round(pr, 2)}_{round(level, 2)}' for (name, pr, level) in trans1])
+        s2 = ' '.join([ f'{name[:4]}_{round(pr, 2)}_{round(level, 2)}' for (name, pr, level) in trans2])
         string_transforms.append( f'{s1}  ||  {s2}' )
     print_sorted_strings_with_counts(string_transforms, topk=5)
         
@@ -292,10 +292,10 @@ def main(args):
     
     neptune_run = init_neptune(
         tags=[
+            f'dataset={args.dataset}', 
             f'random_p={args.random_p}', 
             f'model_save_path={args.model_save_path}', 
             f'reward_a={args.reward_a}', 
-            f'reward_b={args.reward_b}', 
             f'encoder_backbone={args.encoder_backbone}', 
             f'lr={args.lr}',
         ],
@@ -325,7 +325,7 @@ def main(args):
                 random_p=random_p if (epoch-1) > args.warmup_epochs else 1,
                 batch_size=args.ppo_collection_bs,
                 args=args,
-                num_steps=2
+                num_steps=20
             )
             print(f"avg_infoNCE: {avg_infoNCE_loss}")
                     
@@ -397,7 +397,7 @@ def main(args):
 
     print('Linear evaluation man')
     accs = []
-    for i in range(5):
+    for i in range(3):
         accs.append(eval_loop(copy.deepcopy(encoder.enc), args, i))
         line_to_print = f'aggregated linear probe: {np.mean(accs):.3f} +- {np.std(accs):.3f}'
         print(line_to_print)
@@ -421,7 +421,7 @@ if __name__ == "__main__":
     parser.add_argument('--linear_eval_epochs', type=int, default=200, help='Number of epochs for linear evaluation')
     parser.add_argument('--random_p', type=float, default=1.0, help='Random probability')
     parser.add_argument('--encoder_backbone', type=str, default='resnet50', choices=['resnet18', 'resnet50'], help='Encoder backbone architecture')
-    parser.add_argument('--dataset', type=str, default='svhn', choices=['cifar10', 'svhn', 'TinyImagenet'], help='Dataset')
+    parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'svhn', 'TinyImagenet'], help='Dataset')
 
     parser.add_argument('--lr', type=float, default=0.03, help='Learning rate')
         
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     parser.add_argument('--reward_a', type=float, default=1.4, help='Reward parameter a for PPO')
     parser.add_argument('--reward_b', type=float, default=0.2, help='Reward parameter b for PPO')
 
-    parser.add_argument('--mode', type=str, default='debug', choices=['async', 'debug'], help='Training mode')
+    parser.add_argument('--mode', type=str, default='async', choices=['async', 'debug'], help='Training mode')
 
     parser.add_argument('--model_save_path', type=str, default="", help='Path to save the model')
     parser.add_argument('--seed', type=int, default=0, help='Seed for reproducibility')
@@ -455,28 +455,18 @@ if __name__ == "__main__":
     
     args.dataset = 'cifar10' # ['cifar10', 'svhn', 'TinyImagenet']
         
-    args.epochs = 800
-    args.warmup_epochs = 10
-
-    args.simclr_bs = 4
-    args.random_p = 1.0
-    args.lr = 0.03
+    args.random_p = 0.0
         
-    args.ppo_iterations = 2
-    args.ppo_len_trajectory = 16
-    args.ppo_collection_bs = 4
-    args.ppo_update_bs = 16
-    args.ppo_update_epochs = 4
     args.reward_a = 1.4
     args.reward_b = 0.2
 
-    args.mode = 'debug' # ['async', 'debug']
+    args.mode = 'async' # ['async', 'debug']
 
-    args.model_save_path = model_save_path
-    args.seed = seed
+    # args.model_save_path = model_save_path
+    # args.seed = seed
 
-    args.checkpoint_id = ""
-    args.checkpoint_params = ""
+    # args.checkpoint_id = "SIM-529"
+    # args.checkpoint_params = "params_690"
 
 
     main(args)

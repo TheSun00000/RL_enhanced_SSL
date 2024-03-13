@@ -72,204 +72,14 @@ def build_resnet18():
 def build_resnet50():
     return SimCLR('resnet50')
 
-
-class DecoderNN_1input_(nn.Module):
-    def __init__(self,
-            num_transforms,
-            num_discrete_magnitude,
-            device
-            ):
-        super().__init__()
-    
-        self.num_transforms = num_transforms
-        self.num_discrete_magnitude = num_discrete_magnitude
-        self.seq_length = num_transforms
-        self.device = device
-        
-        self.permutations = torch.tensor(
-            list(permutations(range(4)))
-            ).to(device)
-        
-        self.num_transforms_permutations = len(self.permutations)
-        self.num_actions = num_transforms * num_discrete_magnitude
-        
-        self.output_dim_per_view = (
-            # Crop (Position[10], Area[10]):
-            num_discrete_magnitude + num_discrete_magnitude + \
-            # Color (4*magnitude[10], permutations):
-            4 * num_discrete_magnitude + self.num_transforms_permutations + \
-            # Gray (Porba[10]):
-            num_discrete_magnitude + \
-            # Gaussian blur (Sigma[10], Proba[10]):
-            num_discrete_magnitude + num_discrete_magnitude
-        )
-        
-        self.model = nn.Sequential(
-            # nn.Linear(2048, 1024),
-            # nn.ReLU(),
-            # nn.Linear(1024, 1024),
-            # nn.ReLU(),
-            # nn.Linear(1024, 1024),
-            # nn.ReLU(),
-            nn.Linear(2048, 2 * self.output_dim_per_view)
-        )
-        
-        
-    def forward(self, x=None, batch_size=None, old_action_index=None):
-        
-        if x is None:
-            assert batch_size is not None, "batch_size should be specified"
-            x = torch.zeros((batch_size, 2048), dtype=torch.float32).to(device)
-            
-        *leading_dim, input_dim = x.shape
-        
-        x = F.normalize(x, dim=-1)                     
-        output = self.model(x)
-        
-        D = self.num_discrete_magnitude
-        crop_position_offset = 0
-        crop_area_offset = crop_position_offset + 2*D
-        color_magnitude_offset = crop_area_offset + 2*D
-        color_permutation_offset = color_magnitude_offset + 2*(4*D)
-        gray_proba_offset = color_permutation_offset + 2*self.num_transforms_permutations
-        blur_sigma_offset = gray_proba_offset + 2*D
-        blur_proba_offset = blur_sigma_offset + 2*D
-                
-        
-        crop_position_logits = output[:, :crop_area_offset]
-        crop_area_logits = output[:, crop_area_offset:color_magnitude_offset]
-        color_magnitude_logits = output[:, color_magnitude_offset:color_permutation_offset]
-        color_permutation_logits = output[:, color_permutation_offset:gray_proba_offset]
-        gray_proba_logits = output[:, gray_proba_offset:blur_sigma_offset]
-        blur_sigma_logits = output[:, blur_sigma_offset:blur_proba_offset]
-        blur_proba_logits = output[:, blur_proba_offset:]
-
-        
-        crop_position_logits = crop_position_logits.reshape(*leading_dim, 2, D)
-        crop_area_logits = crop_area_logits.reshape(*leading_dim, 2, D)
-        color_magnitude_logits = color_magnitude_logits.reshape(*leading_dim, 2, 4, D)
-        color_permutation_logits = color_permutation_logits.reshape(*leading_dim, 2, self.num_transforms_permutations)
-        gray_proba_logits = gray_proba_logits.reshape(*leading_dim, 2, D)
-        blur_sigma_logits = blur_sigma_logits.reshape(*leading_dim, 2, D)
-        blur_proba_logits = blur_proba_logits.reshape(*leading_dim, 2, D)
-        
-        crop_position_dist = torch.distributions.Categorical(logits=crop_position_logits)
-        crop_area_dist = torch.distributions.Categorical(logits=crop_area_logits)
-        color_magnitude_dist = torch.distributions.Categorical(logits=color_magnitude_logits)
-        color_permutation_dist = torch.distributions.Categorical(logits=color_permutation_logits)
-        gray_proba_dist = torch.distributions.Categorical(logits=gray_proba_logits)
-        blur_sigma_dist = torch.distributions.Categorical(logits=blur_sigma_logits)
-        blur_proba_dist = torch.distributions.Categorical(logits=blur_proba_logits)
-        
-        # print('crop_position:', crop_position_dist.entropy().mean())
-        # print('crop_area:', crop_area_dist.entropy().mean())
-        # print('color_magnitude:', color_magnitude_dist.entropy().mean())
-        # print('color_permutation:', color_permutation_dist.entropy().mean())
-        # print('gray_proba:', gray_proba_dist.entropy().mean())
-        # print('blur_sigma:', blur_sigma_dist.entropy().mean())
-        # print('blur_proba:', blur_proba_dist.entropy().mean())
-        # print('------------------')
-                
-        
-        if old_action_index is None:
-            crop_position_index = crop_position_dist.sample().clip(0, 8)
-            crop_area_index = crop_area_dist.sample()
-            color_magnitude_index = color_magnitude_dist.sample()
-            color_permutation_index = color_permutation_dist.sample()
-            gray_proba_index = gray_proba_dist.sample()
-            blur_sigma_index = blur_sigma_dist.sample()
-            blur_proba_index = blur_proba_dist.sample()
-        else:
-            crop_position_index = old_action_index[..., 0]
-            crop_area_index = old_action_index[..., 1]
-            color_magnitude_index = old_action_index[..., 2:6]
-            color_permutation_index = old_action_index[..., 6]
-            gray_proba_index = old_action_index[..., 7]
-            blur_sigma_index = old_action_index[..., 8]
-            blur_proba_index = old_action_index[..., 9]
-        
-        
-        crop_position_log_p = F.log_softmax(crop_position_logits, dim=-1).gather(-1, crop_position_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
-        crop_area_log_p = F.log_softmax(crop_area_logits, dim=-1).gather(-1, crop_area_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
-        color_magnitude_log_p = F.log_softmax(color_magnitude_logits, dim=-1).gather(-1, color_magnitude_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
-        color_permutation_log_p = F.log_softmax(color_permutation_logits, dim=-1).gather(-1, color_permutation_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
-        gray_proba_log_p = F.log_softmax(gray_proba_logits, dim=-1).gather(-1, gray_proba_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
-        blur_sigma_log_p = F.log_softmax(blur_sigma_logits, dim=-1).gather(-1, blur_sigma_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
-        blur_proba_log_p = F.log_softmax(blur_proba_logits, dim=-1).gather(-1, blur_proba_index.unsqueeze(-1)).reshape(*leading_dim, -1).sum(-1, keepdim=True)
-
-
-        # log_p = (crop_position_log_p + crop_area_log_p) + (color_magnitude_log_p + color_permutation_log_p) + (gray_proba_log_p) + (blur_sigma_log_p + blur_proba_log_p)
-        log_p = (color_magnitude_log_p + color_permutation_log_p)
-        # log_p = (color_magnitude_log_p + color_permutation_log_p)
-        
-        actions_index = torch.concat((
-            crop_position_index.unsqueeze(-1),
-            crop_area_index.unsqueeze(-1),
-            color_magnitude_index,
-            color_permutation_index.unsqueeze(-1),
-            gray_proba_index.unsqueeze(-1),
-            blur_sigma_index.unsqueeze(-1),
-            blur_proba_index.unsqueeze(-1),
-        ), dim=-1)
-                
-        # entropy = (crop_position_dist.entropy().mean() + crop_area_dist.entropy().mean()) + (color_magnitude_dist.entropy().mean() + color_permutation_dist.entropy().mean()) + (gray_proba_dist.entropy().mean()) + (blur_sigma_dist.entropy().mean() + blur_proba_dist.entropy().mean())
-        entropy = (color_magnitude_dist.entropy().mean() + color_permutation_dist.entropy().mean())
-        
-        return (
-                log_p,
-                actions_index,
-                entropy
-            )
-        
-    
-    def sample(self, num_samples):
-        x = torch.zeros((1, 2048), dtype=torch.float32).to(self.device)
-        
-        *leading_dim, input_dim = x.shape
-        
-        x = F.normalize(x, dim=-1)                     
-        output = self.model(x)
-        
-        D = self.num_discrete_magnitude
-        crop_position_offset = 0
-        crop_area_offset = crop_position_offset + 2*D
-        color_magnitude_offset = crop_area_offset + 2*D
-        color_permutation_offset = color_magnitude_offset + 2*(4*D)
-        gray_proba_offset = color_permutation_offset + 2*self.num_transforms_permutations
-        blur_sigma_offset = gray_proba_offset + 2*D
-        blur_proba_offset = blur_sigma_offset + 2*D
-                
-        color_magnitude_logits = output[:, color_magnitude_offset:color_permutation_offset]
-        color_permutation_logits = output[:, color_permutation_offset:gray_proba_offset]
-
-        color_magnitude_logits = color_magnitude_logits.reshape(*leading_dim, 2, 4, D)
-        color_permutation_logits = color_permutation_logits.reshape(*leading_dim, 2, self.num_transforms_permutations)
-        
-        color_magnitude_dist = torch.distributions.Categorical(logits=color_magnitude_logits)
-        color_permutation_dist = torch.distributions.Categorical(logits=color_permutation_logits)
-        
-        color_magnitude_index, color_permutation_index = color_magnitude_dist.sample((num_samples,)), color_permutation_dist.sample((num_samples,))
-
-        actions_index = torch.concat((
-            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
-            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
-            color_magnitude_index.squeeze(1),
-            color_permutation_index.squeeze(1).unsqueeze(-1),
-            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
-            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
-            torch.zeros((num_samples, 2, 1), dtype=torch.int64).to(self.device),
-        ), dim=-1)
-
-        
-        return actions_index
-    
-    
+  
 class DecoderNN_1input(nn.Module):
     def __init__(
             self,
             transforms,
             num_discrete_magnitude,
-            device
+            device,
+            use_proba_head=True
         ):
         super().__init__()
         
@@ -283,6 +93,7 @@ class DecoderNN_1input(nn.Module):
         self.num_transforms = num_transforms
         self.num_discrete_magnitude = num_discrete_magnitude
         self.seq_length = 2
+        self.use_proba_head = use_proba_head
 
         self.transform_embedding = nn.Embedding(num_transforms+1, self.embed_size)
         self.magnitude_embedding = nn.Embedding(num_discrete_magnitude+1, self.embed_size)
@@ -291,18 +102,25 @@ class DecoderNN_1input(nn.Module):
 
         self.rnn = nn.LSTMCell(self.embed_size * self.seq_length * 2 * 2, self.decoder_dim, bias=True)
         
-        # self.transform_fc = nn.Linear(self.decoder_dim,num_transforms)
+        
         self.transform_fc = nn.Sequential(
             nn.Linear(self.decoder_dim,512),
             nn.ReLU(),
             nn.Linear(512,num_transforms)
         )
-        # self.magnitude_fc = nn.Linear(self.decoder_dim,num_discrete_magnitude)
+        
         self.magnitude_fc = nn.Sequential(
             nn.Linear(self.decoder_dim,512),
             nn.ReLU(),
             nn.Linear(512,num_discrete_magnitude)
         )
+        
+        if self.use_proba_head:
+            self.proba_fc = nn.Sequential(
+                nn.Linear(self.decoder_dim,512),
+                nn.ReLU(),
+                nn.Linear(512,num_discrete_magnitude)
+            )
         
         self.device = device
 
@@ -327,6 +145,9 @@ class DecoderNN_1input(nn.Module):
         h_t, c_t = self.rnn(input, (h_t, c_t))
         transform_logits = self.transform_fc(h_t)
         magnitude_logits = self.magnitude_fc(h_t)
+        if self.use_proba_head:
+            proba_logits = self.proba_fc(h_t)
+            return h_t, c_t, transform_logits, magnitude_logits, proba_logits
         return h_t, c_t, transform_logits, magnitude_logits
 
 
@@ -337,6 +158,9 @@ class DecoderNN_1input(nn.Module):
         if old_action is not None:
             old_transform_actions_index = torch.zeros((batch_size, 2, self.seq_length), dtype=torch.long).to(device)
             old_magnitude_actions_index = torch.zeros((batch_size, 2, self.seq_length), dtype=torch.long).to(device)
+            if self.use_proba_head:
+                old_proba_actions_index = torch.zeros((batch_size, 2, self.seq_length), dtype=torch.long).to(device)
+                
             for i in range(len(old_action)):
                 for b in range(2):
                     for s in range(self.seq_length):
@@ -345,6 +169,10 @@ class DecoderNN_1input(nn.Module):
                         magnitude_id = round(level * (self.num_discrete_magnitude-1))
                         old_transform_actions_index[i, b, s] = transform_id
                         old_magnitude_actions_index[i, b, s] = magnitude_id
+                        if self.use_proba_head:
+                            pr = old_action[i][b][s][1]
+                            proba_id = round(pr * (self.num_discrete_magnitude-1))
+                            old_proba_actions_index[i, b, s] = proba_id
             
 
         
@@ -352,9 +180,13 @@ class DecoderNN_1input(nn.Module):
         
         transform_history = torch.full((batch_size, 2, self.seq_length), self.num_transforms, dtype=torch.long).to(device)
         magnitude_history = torch.full((batch_size, 2, self.seq_length), self.num_discrete_magnitude, dtype=torch.long).to(device)
+        if self.use_proba_head:
+            proba_history = torch.full((batch_size, 2, self.seq_length), self.num_discrete_magnitude, dtype=torch.long).to(device)
+            
 
         transform_entropy = 0
         magnitude_entropy = 0
+        proba_entropy = 0
         
         # Initialize LSTM state
         h_t, c_t = self.init_hidden_state(batch_size)  # (batch_size, decoder_dim)
@@ -362,35 +194,72 @@ class DecoderNN_1input(nn.Module):
         for branch in range(2):
             
             for step in range(self.seq_length):
-
-                h_t, c_t, transform_logits, magnitude_logits = self.lstm_forward(
-                    transform_history=transform_history,
-                    magnitude_history=magnitude_history,
-                    h_t=h_t,
-                    c_t=c_t,
-                )
                 
-                
-                if old_action is None:
-                    transform_action_index = Categorical(logits=transform_logits).sample()
-                    magnitude_action_index = Categorical(logits=magnitude_logits).sample()
-                else:
-                    transform_action_index = old_transform_actions_index[:, branch, step]
-                    magnitude_action_index = old_magnitude_actions_index[:, branch, step]
-                                
-                
-                transform_log_p = F.log_softmax(transform_logits, dim=-1).gather(-1,transform_action_index.unsqueeze(-1))
-                magnitude_log_p = F.log_softmax(magnitude_logits, dim=-1).gather(-1,magnitude_action_index.unsqueeze(-1))
-                
-                log_p[:, branch, step] = transform_log_p.squeeze(-1) + magnitude_log_p.squeeze(-1)
-                
-                transform_entropy += Categorical(logits=transform_logits).entropy().mean()
-                magnitude_entropy += Categorical(logits=magnitude_logits).entropy().mean()
-                
-                transform_history = transform_history.clone() 
-                transform_history[range(batch_size), branch, step] = transform_action_index
-                magnitude_history = magnitude_history.clone() 
-                magnitude_history[range(batch_size), branch, step] = magnitude_action_index
+                if not self.use_proba_head: 
+                    
+                    h_t, c_t, transform_logits, magnitude_logits = self.lstm_forward(
+                        transform_history=transform_history,
+                        magnitude_history=magnitude_history,
+                        h_t=h_t,
+                        c_t=c_t,
+                    )
+                    
+                    if old_action is None:
+                        transform_action_index = Categorical(logits=transform_logits).sample()
+                        magnitude_action_index = Categorical(logits=magnitude_logits).sample()
+                    else:
+                        transform_action_index = old_transform_actions_index[:, branch, step]
+                        magnitude_action_index = old_magnitude_actions_index[:, branch, step]
+                                    
+                    
+                    transform_log_p = F.log_softmax(transform_logits, dim=-1).gather(-1,transform_action_index.unsqueeze(-1))
+                    magnitude_log_p = F.log_softmax(magnitude_logits, dim=-1).gather(-1,magnitude_action_index.unsqueeze(-1))
+                    
+                    log_p[:, branch, step] = transform_log_p.squeeze(-1) + magnitude_log_p.squeeze(-1)
+                    
+                    transform_entropy += Categorical(logits=transform_logits).entropy().mean()
+                    magnitude_entropy += Categorical(logits=magnitude_logits).entropy().mean()
+                    
+                    transform_history = transform_history.clone() 
+                    transform_history[range(batch_size), branch, step] = transform_action_index
+                    magnitude_history = magnitude_history.clone() 
+                    magnitude_history[range(batch_size), branch, step] = magnitude_action_index
+                    
+                else: # if self.use_proba_head:
+                    
+                    h_t, c_t, transform_logits, magnitude_logits, proba_logits = self.lstm_forward(
+                        transform_history=transform_history,
+                        magnitude_history=magnitude_history,
+                        h_t=h_t,
+                        c_t=c_t,
+                    )
+                    
+                    if old_action is None:
+                        transform_action_index = Categorical(logits=transform_logits).sample()
+                        magnitude_action_index = Categorical(logits=magnitude_logits).sample()
+                        proba_action_index = Categorical(logits=proba_logits).sample()
+                    else:
+                        transform_action_index = old_transform_actions_index[:, branch, step]
+                        magnitude_action_index = old_magnitude_actions_index[:, branch, step]
+                        proba_action_index = old_proba_actions_index[:, branch, step]
+                                    
+                    
+                    transform_log_p = F.log_softmax(transform_logits, dim=-1).gather(-1,transform_action_index.unsqueeze(-1))
+                    magnitude_log_p = F.log_softmax(magnitude_logits, dim=-1).gather(-1,magnitude_action_index.unsqueeze(-1))
+                    proba_log_p = F.log_softmax(magnitude_logits, dim=-1).gather(-1,proba_action_index.unsqueeze(-1))
+                    
+                    log_p[:, branch, step] = transform_log_p.squeeze(-1) + magnitude_log_p.squeeze(-1) + proba_log_p.squeeze(-1)
+                    
+                    transform_entropy += Categorical(logits=transform_logits).entropy().mean()
+                    magnitude_entropy += Categorical(logits=magnitude_logits).entropy().mean()
+                    proba_entropy += Categorical(logits=proba_logits).entropy().mean()
+                    
+                    transform_history = transform_history.clone() 
+                    transform_history[range(batch_size), branch, step] = transform_action_index
+                    magnitude_history = magnitude_history.clone() 
+                    magnitude_history[range(batch_size), branch, step] = magnitude_action_index
+                    proba_history = proba_history.clone() 
+                    proba_history[range(batch_size), branch, step] = proba_action_index
                 
 
 
@@ -398,6 +267,9 @@ class DecoderNN_1input(nn.Module):
         transform_entropy /= (2*self.seq_length)
         magnitude_entropy /= (2*self.seq_length)
         entropy = transform_entropy + magnitude_entropy
+        
+        if self.use_proba_head:
+            entropy += proba_entropy / (2*self.seq_length)
         
         log_p = log_p.reshape(batch_size, -1).sum(-1) 
         log_p = log_p.unsqueeze(-1)
@@ -410,10 +282,15 @@ class DecoderNN_1input(nn.Module):
             action[-1].append([])
             for b in range(2):
                 for s in range(self.seq_length):
-                    level = (magnitude_history[i, b, s] / (self.num_discrete_magnitude-1)).item()                    
+                    level = (magnitude_history[i, b, s] / (self.num_discrete_magnitude-1)).item()
+                    
+                    pr = 0.8
+                    if self.use_proba_head:
+                        pr = (proba_history[i, b, s] / (self.num_discrete_magnitude-1)).item()    
+                    
                     action[-1][b].append((
                         self.transforms[transform_history[i, b, s]],
-                        0.8,
+                        pr,
                         level
                     ))
         

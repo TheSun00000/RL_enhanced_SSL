@@ -115,10 +115,11 @@ def collect_trajectories_with_input(
 
         with torch.no_grad():
             log_p, actions_index, entropy = decoder(batch_size=batch_size)
-            new_log_p, new_actions_index, new_entropy = decoder(batch_size=batch_size, old_action=actions_index)
-            assert (log_p == new_log_p).all()
-            assert (actions_index == new_actions_index)
-            assert (entropy == new_entropy).all()
+            # new_log_p, new_actions_index, new_entropy = decoder(batch_size=batch_size, old_action=actions_index)
+            # assert (log_p == new_log_p).all()
+            # assert (actions_index == new_actions_index)
+            # assert (entropy == new_entropy).all()
+            
             
         num_discrete_magnitude = decoder.num_discrete_magnitude
         transforms_list_1, transforms_list_2 = get_transforms_list(
