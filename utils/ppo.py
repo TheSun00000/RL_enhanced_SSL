@@ -36,19 +36,57 @@ def infonce_reward_function(new_z1, new_z2):
     return reward
 
 
-def get_transformations_strength(actions):
+def sub_policy_stregnth(sub_policy):
     
-    batch_size = len(actions)
+    transform_weight = {
+        'ShearX':0.5,
+        'ShearY':0.5,
+        'TranslateX':0.5,
+        'TranslateY':0.5,
+        'Rotate':0.5,
+        'AutoContrast':0.9,
+        'Invert':0.9,
+        'Equalize':0.9,
+        'Solarize':1.,
+        'Posterize':1.,
+        'Contrast':1.,
+        'Color':1.,
+        'Brightness':1.,
+        'Sharpness':1.,
+        'Cutout':0.5,
+        'Identity':0.0
+    }
+
+    w = 0
+    for name, pr, lvl in sub_policy:
+        if name in ['ShearX', 'ShearY', 'Rotate', 'Contrast', 'Color', 'Brightness', 'Sharpness']:
+            s = abs(lvl - 0.5) / 0.5
+        # elif name in ['AutoContrast', 'Invert', 'Equalize']:
+        #     s = 1
+        elif name in ['Solarize', 'Posterize']:
+            s = 1-lvl
+        else:
+            s = 0
+        
+        if s != 0:
+            w += s * transform_weight[name]
+
+    return w / len(sub_policy)
+
+
+def get_action_strength(actions_index):
     
-    color_jitter_strength = []
-    for b in range(len(actions)):
-        color_jitter_strength.append([])
-        for i in range(len(actions[0])):
-            mean_level = sum([level for name, pr, level in actions[b][i]]) / len(actions[0][0])
-            color_jitter_strength[-1].append(mean_level)
+    ret = []
     
-    color_jitter_strength = torch.tensor(color_jitter_strength)
-    return color_jitter_strength
+    for subpolicy_2 in actions_index:
+        w = 0
+        for subpolicy in subpolicy_2:
+            w += sub_policy_stregnth(subpolicy)
+        w /= len(subpolicy_2)
+        ret.append(w)
+    
+    return torch.tensor(ret)
+
 
 
 def print_sorted_strings_with_counts(input_list, topk):
@@ -146,9 +184,12 @@ def collect_trajectories_with_input(
             
         infoNCE_reward = infonce_reward_function(new_z1, new_z2)
 
+        strength = get_action_strength(actions_index)
+        
         a, b = args.reward_a, args.reward_b
         infoNCE_reward_avg = infoNCE_reward/avg_infoNCE_loss
-        reward = torch.where(infoNCE_reward_avg <= a, infoNCE_reward_avg, (-a/b)*(infoNCE_reward_avg-(a+b)))
+        reward = torch.where(infoNCE_reward_avg <= a, infoNCE_reward_avg+0.01*strength.to(device), (-a/b)*(infoNCE_reward_avg-(a+b))) 
+        
         
         stored_log_p[begin:end] = log_p.detach().cpu()
         stored_actions_index += actions_index

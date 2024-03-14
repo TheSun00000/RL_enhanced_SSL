@@ -25,10 +25,41 @@ from utils.transforms import (
 )
 
 
-# in100_dataset_train = torchvision.datasets.ImageFolder(root='dataset/imagenet100/train')
-# in100_dataset_val = torchvision.datasets.ImageFolder(root='dataset/imagenet100/val')
+# in100_dataset_train = torchvision.datasets.ImageFolder(
+#     root='/scratch/nb3891/Script/RL_enhanced_SSL/dataset/tiny-imagenet-200/train',
+#     transform=transforms.ToTensor()
+# )
+# in100_dataset_val = torchvision.datasets.ImageFolder(root='dataset/tiny-imagenet-200/val/images')
 
 
+# loader = DataLoader(in100_dataset_train, batch_size=512, shuffle=True, num_workers=8)
+
+dataset = MyDatset(
+    train_dataset=torchvision.datasets.ImageFolder('/scratch/nb3891/Script/RL_enhanced_SSL/dataset/tiny-imagenet-200/train'),
+    policies=[],
+    random_p=1,
+    ppo_dist=[],
+    transform=True,
+    normalize=transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    random_resized_crop=transforms.RandomResizedCrop(64, scale=(0.2, 1.))
+)
+
+
+
+data_loader = DataLoader(
+    dataset,
+    batch_size=512,
+    drop_last=True,
+    shuffle=True,
+    num_workers=4
+)
+
+
+
+for _ in tqdm(data_loader, total=len(data_loader)):
+    pass
+
+exit()
 
 
 class MyImageNet100Dataset(Dataset):

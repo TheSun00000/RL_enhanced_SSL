@@ -42,14 +42,6 @@ def TranslateY(img, v):  # [-150, 150] => percentage: [-0.45, 0.45]
     return img.transform(img.size, PIL.Image.AFFINE, (1, 0, 0, 0, 1, v))
 
 
-def TranslateXAbs(img, v):  # [-150, 150] => percentage: [-0.45, 0.45]
-    return img.transform(img.size, PIL.Image.AFFINE, (1, 0, v, 0, 1, 0))
-
-
-def TranslateYAbs(img, v):  # [-150, 150] => percentage: [-0.45, 0.45]
-    return img.transform(img.size, PIL.Image.AFFINE, (1, 0, 0, 0, 1, v))
-
-
 def Rotate(img, v):  # [-30, 30]
     return img.rotate(v)
 
@@ -66,10 +58,6 @@ def Equalize(img, _):
     return PIL.ImageOps.equalize(img)
 
 
-def Flip(img, _):  # not from the paper
-    return PIL.ImageOps.mirror(img)
-
-
 def Solarize(img, v):  # [0, 256]
     assert 0 <= v <= 256
     return PIL.ImageOps.solarize(img, v)
@@ -77,12 +65,6 @@ def Solarize(img, v):  # [0, 256]
 
 def Posterize(img, v):  # [4, 8]
     assert 4 <= v <= 8
-    v = int(v)
-    return PIL.ImageOps.posterize(img, v)
-
-
-def Posterize2(img, v):  # [0, 4]
-    assert 0 <= v <= 4
     v = int(v)
     return PIL.ImageOps.posterize(img, v)
 

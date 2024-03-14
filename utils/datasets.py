@@ -175,7 +175,8 @@ def get_dataloader(dataset_name, batch_size, policies=[], random_p=1, ppo_dist=[
         drop_last=True,
         shuffle=True,
         collate_fn=None if transform else MyRawDatset_collate_fn,
-        pin_memory=True
+        pin_memory=True,
+        num_workers=4,
     )
 
     
@@ -218,14 +219,14 @@ def get_knn_evaluation_loader(dataset_name, batch_size=512):
         shuffle=False,
         batch_size=batch_size,
         pin_memory=True,
-        num_workers=1
+        num_workers=4
     )
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
         shuffle=False,
         batch_size=batch_size,
         pin_memory=True,
-        num_workers=1
+        num_workers=4
     )
         
     return memory_loader, test_loader
@@ -285,14 +286,14 @@ def get_linear_evaluation_loader(dataset_name, batch_size):
         shuffle=False,
         batch_size=batch_size,
         pin_memory=True,
-        num_workers=1
+        num_workers=4
     )
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
         shuffle=False,
         batch_size=batch_size,
         pin_memory=True,
-        num_workers=1
+        num_workers=4
     )
         
     return memory_loader, test_loader
