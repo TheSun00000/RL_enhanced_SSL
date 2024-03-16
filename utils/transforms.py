@@ -5,6 +5,7 @@ import numpy as np
 from itertools import permutations
 import random
 import PIL
+from copy import deepcopy
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device
@@ -167,11 +168,43 @@ def split_interval(lower: float, upper: float, N: int):
     return split_points   
 
 
-def get_transforms_list(actions, num_magnitudes):
+def get_transforms_list(actions, p=0):
     
+    actions_1 = [action1 for action1, _ in actions]
+    actions_2 = [action2 for _, action2 in actions]
+    
+    # for _ in actions_1:print(_)
+    # print()
+    # for _ in actions_2:print(_)
+    # print('----')
+    
+    if p != 0:
+        L = len(actions_1)
+        indices = list(range(L))
+        random.shuffle(indices)
+        indices = indices[:int(L*p)] # indices where we permute
+
+        indices_a = indices.copy()
+        indices_b = indices.copy()
+
+        random.shuffle(indices_b)
+
+        actions_2_ = deepcopy(actions_2)
+        
+        # print(indices_a, indices_b)
+        
+        for i, j in zip(indices_a, indices_b):
+            # print(i, j)
+            actions_2_[i] = deepcopy(actions_2[j])
+            
+        actions_2 = actions_2_
+        
+    # for _ in actions_1:print(_)
+    # print()
+    # for _ in actions_2:print(_)
+    # print('\n'*5)    
     return (
-        [action1 for action1, _ in actions],
-        [action2 for _, action2 in actions],
+        actions_1, actions_2
     )
 
 

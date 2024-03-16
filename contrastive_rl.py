@@ -221,10 +221,7 @@ def ppo_round(
         rewards.append(float(trajectory[-1].mean()))
                 
     stored_actions_index = trajectory[1]
-    transforms_list_1, transforms_list_2 = get_transforms_list(
-        stored_actions_index,
-        num_magnitudes=decoder.num_discrete_magnitude
-    )
+    transforms_list_1, transforms_list_2 = get_transforms_list(stored_actions_index)
     string_transforms = []
     for trans1, trans2 in zip(transforms_list_1, transforms_list_2):
         s1 = ' '.join([ f'{name[:4]}_{round(pr, 2)}_{round(level, 2)}' for (name, pr, level) in trans1])
@@ -459,7 +456,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     
-    seed = fix_seed(args.seed)
+    seed = fix_seed()
     args.seed = seed
     
     if not args.model_save_path:
@@ -477,7 +474,7 @@ if __name__ == "__main__":
     args.proba_head = False
     args.two_branches = True
 
-    args.mode = 'async' # ['async', 'debug']
+    args.mode = 'debug' # ['async', 'debug']
 
     # args.model_save_path = model_save_path
     # args.seed = seed

@@ -3,7 +3,8 @@ import torch.nn.functional as F
 from torchvision import transforms
 from collections import Counter
 import neptune
-
+from copy import deepcopy
+import random
 
 
 from utils.datasets import get_dataloader
@@ -111,7 +112,8 @@ def collect_trajectories_with_input(
         args,
         avg_infoNCE_loss: float,
         batch_size: int,
-        neptune_run: neptune.Run
+        neptune_run: neptune.Run,
+        p=0.0
     ):
 
     assert len_trajectory % batch_size == 0
@@ -140,6 +142,8 @@ def collect_trajectories_with_input(
     mean_entropy = 0
     mean_infonce_reward = 0 
     
+    encoder.eval()
+    
     data_loader_iterator = iter(data_loader)
     for i in range(len_trajectory // batch_size):
 
@@ -158,32 +162,70 @@ def collect_trajectories_with_input(
             # assert (actions_index == new_actions_index)
             # assert (entropy == new_entropy).all()
             
+        if p == 0:
             
-        num_discrete_magnitude = decoder.num_discrete_magnitude
-        transforms_list_1, transforms_list_2 = get_transforms_list(
-            actions_index,
-            num_magnitudes=num_discrete_magnitude)
-        
-
-        new_img1 = apply_transformations(img, transforms_list_1)
-        new_img2 = apply_transformations(img, transforms_list_2)
-
-        new_img1 = torch.stack([last_transform(img) for img in new_img1])
-        new_img2 = torch.stack([last_transform(img) for img in new_img2])
-        
-        
-        new_img1 = new_img1.to(device)
-        new_img2 = new_img2.to(device)
-        
-        infoNCE_reward = None
-        
-        encoder.eval()
-        with torch.no_grad():
-            _, new_z1 = encoder(new_img1)
-            _, new_z2 = encoder(new_img2)
+            transforms_list_1, transforms_list_2 = get_transforms_list(actions_index)
             
-        infoNCE_reward = infonce_reward_function(new_z1, new_z2)
+            new_img1 = apply_transformations(img, transforms_list_1)
+            new_img2 = apply_transformations(img, transforms_list_2)
 
+            new_img1 = torch.stack([last_transform(img) for img in new_img1])
+            new_img2 = torch.stack([last_transform(img) for img in new_img2])
+                    
+            with torch.no_grad():
+                _, new_z1 = encoder(new_img1.to(device))
+                _, new_z2 = encoder(new_img2.to(device))
+                
+            infoNCE_reward = infonce_reward_function(new_z1, new_z2)
+        
+        else: # random permute p% transformation:
+            
+            ids = torch.tensor([ range(batch_size), range(batch_size) ])
+            new_ids = ids.clone()
+            new_action_index = deepcopy(actions_index)
+
+            if p != 0:
+                
+                L = int(batch_size*p)
+                
+                # Get random indices of the transformations that are going to be permuted
+                indices = list(range(batch_size))
+                random.shuffle(indices)
+                indices = sorted(indices[:L])
+                
+                # print(indices)
+                
+                # original transformations indices of format: (branch[0,1], n) 
+                indices_2d = [(0, i) for i in indices] + [(1, i) for i in indices]
+                
+                # shuffle  the original transformations indices
+                new_indices_2d = indices_2d.copy()
+                random.shuffle(new_indices_2d)
+                
+                # Permute the samples
+                for (i, j), (new_i, new_j) in zip(indices_2d, new_indices_2d):
+                    # print((i, j), (new_i, new_j))
+                    new_ids[i, j] = ids[new_i, new_j]
+                    new_action_index[j][i] = new_action_index[new_j][new_i]
+
+
+            transforms_list_1, transforms_list_2 = get_transforms_list(new_action_index)
+            
+            new_img1 = apply_transformations(img, transforms_list_1)
+            new_img2 = apply_transformations(img, transforms_list_2)
+
+            new_img1 = torch.stack([last_transform(img) for img in new_img1])
+            new_img2 = torch.stack([last_transform(img) for img in new_img2])
+                    
+            with torch.no_grad():
+                _, new_z1 = encoder(new_img1.to(device))
+                _, new_z2 = encoder(new_img2.to(device))
+                
+            infoNCE_reward = infonce_reward_function(new_z1, new_z2)
+            infoNCE_reward = (infoNCE_reward[new_ids[0]] + infoNCE_reward[new_ids[1]]) / 2
+        
+        
+        
         strength = get_action_strength(actions_index)
         
         a, b = args.reward_a, args.reward_b
