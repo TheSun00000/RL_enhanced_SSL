@@ -339,11 +339,11 @@ def get_avg_loss(encoder, policies, criterion, random_p, batch_size, args, num_s
     dist = get_policy_distribution(N=min(len(policies), 4), p=0.6)
     # train_loader = get_cifar10_dataloader(batch_size, random_p, policies, dist)
     train_loader = get_dataloader(
-        dataset_name=args.dataset,
+        args=args,
         batch_size=batch_size,
         random_p=random_p,
         policies=policies,
-        ppo_dist=dist
+        ppo_dist=dist,
     )
     
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[get_average_infoNCE_loss]')

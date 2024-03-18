@@ -139,6 +139,7 @@ def adjust_learning_rate(
 def init(args, neptune_run, device):
     
     start_epoch = 1
+    all_policies = []
     
     encoder, simclr_optimizer, simclr_criterion = contrastive_init(args, device)
     decoder, ppo_optimizer = ppo_init(args, device)
@@ -152,6 +153,11 @@ def init(args, neptune_run, device):
         decoder.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder.pt'))
         ppo_optimizer.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder_opt.pt'))
         
+        with open(f'params/{checkpoint_params}/all_policies.pkl', 'br') as file:
+            all_policies = pickle.load(file)
+            
+        print('len(all_policies) =', len(all_policies))
+                
         prev_run = neptune.init_run(
             project="nazim-bendib/simclr-rl",
             api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIxNDVjNWJkYi1mMTIwLTRmNDItODk3Mi03NTZiNzIzZGNhYzMifQ==",
@@ -163,18 +169,18 @@ def init(args, neptune_run, device):
         test_acc = prev_run['linear_eval/test_acc'].fetch_values().value.tolist()
         start_epoch = len(test_acc) + 1
         
-        for acc in test_acc:
-            neptune_run["linear_eval/test_acc"].append(acc)
+        # for acc in test_acc:
+        #     neptune_run["linear_eval/test_acc"].append(acc)
             
-        loss = prev_run['simclr/loss'].fetch_values().value.tolist()
-        for i in loss:
-            neptune_run['simclr/loss'].append(i)
+        # loss = prev_run['simclr/loss'].fetch_values().value.tolist()
+        # for i in loss:
+        #     neptune_run['simclr/loss'].append(i)
 
         prev_run.stop()
     
     return (
         (encoder, simclr_optimizer, simclr_criterion),
-        (decoder, ppo_optimizer), start_epoch
+        (decoder, ppo_optimizer), start_epoch, all_policies
     )
     
         
@@ -250,11 +256,11 @@ def contrastive_round(
     dist = get_policy_distribution(N=min(len(policies), 4), p=0.6)
     print(f'policies dist: {dist}')
     train_loader = get_dataloader(
-        dataset_name=args.dataset,
+        args=args,
         batch_size=batch_size,
         random_p=random_p,
         policies=policies,
-        ppo_dist=dist
+        ppo_dist=dist,
     )
     
     tqdm_train_loader = tqdm(enumerate(train_loader), total=len(train_loader), desc='[contrastive_round]')    
@@ -284,15 +290,26 @@ def contrastive_round(
         optimizer.step()
 
         # logs:
-        neptune_run["simclr/loss"].append(simclr_loss.item())
-        neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
-        neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
+        if it % (len(train_loader) // 10) == 0:
+            neptune_run["simclr/loss"].append(simclr_loss.item())
+            # neptune_run["simclr/top_5_acc"].append(top_k_accuracy(sim, 5))
+            # neptune_run["simclr/top_1_acc"].append(top_k_accuracy(sim, 1))
 
         
         
 
 def main(args):
 
+    
+    if args.augmentation != 'ppo':
+        args.random_p = 1
+        
+    if args.dataset == 'cifar10':
+        args.epochs = 800
+    elif args.dataset == 'svhn':
+        args.epochs = 400
+    
+    
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('device:', device)
     
@@ -301,9 +318,13 @@ def main(args):
     neptune_run = init_neptune(
         tags=[
             f'dataset={args.dataset}', 
+            f'augmentation={args.augmentation}',
+            f'randaugment_M={args.randaugment_M}',
             f'random_p={args.random_p}', 
             f'model_save_path={args.model_save_path}', 
-            f'reward_a={args.reward_a}', 
+            f'reward_a={args.reward_a}',
+            f'ppo_permutation_p={args.ppo_permutation_p}',
+            f'two_branches={args.two_branches}',
             f'encoder_backbone={args.encoder_backbone}', 
             f'lr={args.lr}',
         ],
@@ -311,10 +332,10 @@ def main(args):
     )
     neptune_run["scripts"].upload_files(["./utils/*.py", "./*.py"])
 
-
-    (encoder, simclr_optimizer, simclr_criterion), (decoder, ppo_optimizer), start_epoch = init(args, neptune_run, device)
-
     all_policies = []
+    (encoder, simclr_optimizer, simclr_criterion), (decoder, ppo_optimizer), start_epoch, all_policies = init(args, neptune_run, device)
+
+    
 
 
     for epoch in tqdm(range(start_epoch, args.epochs+1), desc='[Main Loop]'):
@@ -324,7 +345,7 @@ def main(args):
         print(f'EPOCH:{epoch}    P:{random_p}')
             
         
-        if (epoch > args.warmup_epochs) and ((epoch-1) % 10 == 0):
+        if (args.augmentation == 'ppo') and (epoch > args.warmup_epochs) and ((epoch-1) % 10 == 0):
             
             avg_infoNCE_loss = get_avg_loss(
                 encoder=encoder,
@@ -347,7 +368,7 @@ def main(args):
                 neptune_run=neptune_run,
             )
                     
-            policy = decoder.get_policy_list()
+            policy = decoder.get_policy_list(1000)
             all_policies.append(policy)
                 
             with open(f'{model_save_path}/all_policies.pkl', 'bw') as file:
@@ -375,7 +396,9 @@ def main(args):
 
         
         
-        if epoch in [200, 400, 600, 800]:
+        if (args.dataset == 'cifar10' and epoch in [200, 400, 600, 800]) or \
+           (args.dataset == 'svhn'    and epoch in [100, 200, 300, 400]):
+            
             os.mkdir(f'{model_save_path}/epoch_{epoch}/')
             torch.save(encoder.state_dict(), f'{model_save_path}/epoch_{epoch}/encoder.pt')
             torch.save(simclr_optimizer.state_dict(), f'{model_save_path}/epoch_{epoch}/encoder_opt.pt')
@@ -399,8 +422,10 @@ def main(args):
             neptune_run["params/decoder"].upload(f'{model_save_path}/decoder.pt')
             neptune_run["params/decoder_opt"].upload(f'{model_save_path}/decoder_opt.pt')
             if all_policies:
-                neptune_run["params/policies"].upload(f'{model_save_path}/all_policies.pkl')
-
+                try:
+                    neptune_run["params/policies"].upload(f'{model_save_path}/all_policies.pkl')
+                except:
+                    pass
 
 
     print('Linear evaluation man')
@@ -426,10 +451,11 @@ if __name__ == "__main__":
 
     parser.add_argument('--simclr_iterations', type=str, default='all', help='Iterations for SimCLR training')
     parser.add_argument('--simclr_bs', type=int, default=512, help='Batch size for SimCLR training')
-    parser.add_argument('--linear_eval_epochs', type=int, default=200, help='Number of epochs for linear evaluation')
     parser.add_argument('--random_p', type=float, default=1.0, help='Random probability')
     parser.add_argument('--encoder_backbone', type=str, default='resnet50', choices=['resnet18', 'resnet50'], help='Encoder backbone architecture')
     parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'svhn', 'TinyImagenet'], help='Dataset')
+    parser.add_argument('--augmentation', type=str, default='random', choices=['random', 'randaugment', 'ppo'], help='Dataset')
+    parser.add_argument('--randaugment_M', type=int, default=9, help='Dataset')
 
     parser.add_argument('--lr', type=float, default=0.03, help='Learning rate')
         
@@ -438,10 +464,11 @@ if __name__ == "__main__":
     parser.add_argument('--ppo_collection_bs', type=int, default=128, help='Batch size for PPO data collection')
     parser.add_argument('--ppo_update_bs', type=int, default=16, help='Batch size for PPO update')
     parser.add_argument('--ppo_update_epochs', type=int, default=4, help='Number of epochs for PPO update')
+    parser.add_argument('--ppo_permutation_p', type=float, default=0.0, help='')
     parser.add_argument('--reward_a', type=float, default=1.4, help='Reward parameter a for PPO')
     parser.add_argument('--reward_b', type=float, default=0.2, help='Reward parameter b for PPO')
-    parser.add_argument('--proba_head', type=bool, default=True)
-    parser.add_argument('--two_branches', type=bool, default=True)
+    parser.add_argument('--proba_head', action='store_true', help='Probability head')
+    parser.add_argument('--two_branches', action='store_true', help='Two branches')
 
     parser.add_argument('--mode', type=str, default='async', choices=['async', 'debug'], help='Training mode')
 
@@ -450,13 +477,10 @@ if __name__ == "__main__":
 
     parser.add_argument('--checkpoint_id', type=str, default="", help='Checkpoint ID')
     parser.add_argument('--checkpoint_params', type=str, default="", help='Checkpoint parameters')
-    # Uncomment below lines if you want to set default values for checkpoint_id and checkpoint_params
-    # parser.add_argument('--checkpoint_id', type=str, default="SIM-511", help='Checkpoint ID')
-    # parser.add_argument('--checkpoint_params', type=str, default="params_655", help='Checkpoint parameters')
 
     args = parser.parse_args()
     
-    seed = fix_seed()
+    seed = fix_seed(args.seed)
     args.seed = seed
     
     if not args.model_save_path:
@@ -464,23 +488,24 @@ if __name__ == "__main__":
         args.model_save_path = model_save_path
         
     
-    args.dataset = 'cifar10' # ['cifar10', 'svhn', 'TinyImagenet']
+    # args.dataset = 'svhn'     # ['cifar10', 'svhn', 'TinyImagenet']
+    # args.augmentation = 'random' # ['random', 'randaugment', 'ppo']
+    # args.randaugment_M = 15
         
-    args.random_p = 0.0
+    # args.random_p = 0.0
         
-    args.reward_a = 1.2
-    args.reward_b = 0.2
+    # args.reward_a = 1.2
+    # args.reward_b = 0.2
+    # args.ppo_permutation_p = 0.0
     
-    args.proba_head = False
-    args.two_branches = True
+    # args.proba_head = False
+    # args.two_branches = True
 
-    args.mode = 'debug' # ['async', 'debug']
+    # args.mode = 'debug' # ['async', 'debug', 'sync']
+    
 
-    # args.model_save_path = model_save_path
-    # args.seed = seed
-
-    # args.checkpoint_id = "SIM-550"
-    # args.checkpoint_params = "params_748"
+    # args.checkpoint_id = "SIM-537"
+    # args.checkpoint_params = "params_728"
 
 
     main(args)

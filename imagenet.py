@@ -1,6 +1,6 @@
 from torch.utils.data import DataLoader, Dataset
 import torchvision
-from utils.datasets import MyDatset
+from utils.datasets import MyDataset
 import os
 from PIL import Image
 
@@ -34,7 +34,7 @@ from utils.transforms import (
 
 # loader = DataLoader(in100_dataset_train, batch_size=512, shuffle=True, num_workers=8)
 
-dataset = MyDatset(
+dataset = MyDataset(
     train_dataset=torchvision.datasets.ImageFolder('/scratch/nb3891/Script/RL_enhanced_SSL/dataset/tiny-imagenet-200/train'),
     policies=[],
     random_p=1,
@@ -155,7 +155,7 @@ in100_dataset_train = DataLoader(in100_dataset_train, 512, shuffle=True, num_wor
 
 # exit()
 
-# dataset = MyDatset(
+# dataset = MyDataset(
 #     train_dataset=in100_dataset_train,
 #     policies=[],
 #     random_p=1,

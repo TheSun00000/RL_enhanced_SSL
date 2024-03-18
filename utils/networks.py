@@ -300,7 +300,7 @@ class DecoderNN_1input(nn.Module):
             entropy
         )
     
-    def get_policy_list(self, N=20000):
+    def get_policy_list(self, N=1000):
         _, policy, _ = self.forward(N)
         return policy
     
@@ -535,7 +535,7 @@ class DecoderNN_1input_one_branch(nn.Module):
             entropy
         )
     
-    def get_policy_list(self, N=20000):
+    def get_policy_list(self, N=1000):
         _, policy, _ = self.forward(N)
         return policy
     

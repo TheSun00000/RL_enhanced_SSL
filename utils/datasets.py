@@ -73,8 +73,8 @@ def MyRawDatset_collate_fn(imgs_y):
     return imgs, targets
 
 
-class MyDatset(Dataset):
-    def __init__(self, train_dataset, policies=[], random_p=1, ppo_dist=[], transform=True, normalize=None, random_resized_crop=None):
+class MyDataset(Dataset):
+    def __init__(self, train_dataset, args, policies=[], random_p=1, ppo_dist=[], transform=True, normalize=None, random_resized_crop=None):
                 
         self.train_dataset = train_dataset
         self.policies = policies
@@ -82,7 +82,12 @@ class MyDatset(Dataset):
         self.ppo_dist = ppo_dist
         self.transform = transform
         
-        self.random_policy = RandomAugmentation(N=2, pr=0.8)
+        if args.augmentation == 'random' or args.augmentation == 'ppo':
+            self.random_policy = RandomAugmentation(N=2, pr=1)
+        elif args.augmentation == 'randaugment':
+            self.random_policy = transforms.RandAugment(num_ops=2, magnitude=args.randaugment_M)
+        
+        
         self.ppo_policy = None
         if random_p != 1:
             self.ppo_policy = Augmentation(policies, dist=ppo_dist)
@@ -133,39 +138,42 @@ class MyDatset(Dataset):
 
 
 
-def get_dataloader(dataset_name, batch_size, policies=[], random_p=1, ppo_dist=[], transform=True):        
+def get_dataloader(args, batch_size, policies=[], random_p=1, ppo_dist=[], transform=True):        
     
-    if dataset_name in ['cifar10', 'svhn'] :
+    if args.dataset in ['cifar10', 'svhn'] :
         normalize = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
         random_resized_crop = transforms.RandomResizedCrop(32, scale=(0.2, 1.))
         
-        if dataset_name == 'cifar10':
+        if args.dataset == 'cifar10':
             dataset = torchvision.datasets.CIFAR10('./dataset/')
-        elif dataset_name == 'svhn':
+        elif args.dataset == 'svhn':
             dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='train')
         
-        dataset = MyDatset(
+        dataset = MyDataset(
             train_dataset=dataset,
+            args=args,
             policies=policies,
             random_p=random_p,
             ppo_dist=ppo_dist,
             transform=transform,
             normalize=normalize,
-            random_resized_crop=random_resized_crop)
+            random_resized_crop=random_resized_crop,
+        )
         
 
-    elif dataset_name == 'TinyImagenet':
+    elif args.dataset == 'TinyImagenet':
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         random_resized_crop = transforms.RandomResizedCrop(64, scale=(0.2, 1.))
 
-        dataset = MyDatset(
+        dataset = MyDataset(
             train_dataset=torchvision.datasets.ImageFolder('dataset/tiny-imagenet-200/train'),
+            args=args,
             policies=policies,
             random_p=random_p,
             ppo_dist=ppo_dist,
             transform=transform,
             normalize=normalize,
-            random_resized_crop=random_resized_crop
+            random_resized_crop=random_resized_crop,
         )
     
     
