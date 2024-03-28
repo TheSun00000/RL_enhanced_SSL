@@ -95,9 +95,9 @@ def ppo_init(args, device):
 def contrastive_init(args, device):
     
     if args.encoder_backbone == 'resnet18':
-        encoder = build_resnet18()
+        encoder = build_resnet18(args.reduce_resnet)
     elif args.encoder_backbone == 'resnet50':
-        encoder = build_resnet50()
+        encoder = build_resnet50(args.reduce_resnet)
     
     encoder = encoder.to(device)
 
@@ -153,8 +153,11 @@ def init(args, neptune_run, device):
         decoder.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder.pt'))
         ppo_optimizer.load_state_dict(torch.load(f'params/{checkpoint_params}/decoder_opt.pt'))
         
-        with open(f'params/{checkpoint_params}/all_policies.pkl', 'br') as file:
-            all_policies = pickle.load(file)
+        try:
+            with open(f'params/{checkpoint_params}/all_policies.pkl', 'br') as file:
+                all_policies = pickle.load(file)
+        except:
+            pass
             
         print('len(all_policies) =', len(all_policies))
                 
@@ -169,8 +172,8 @@ def init(args, neptune_run, device):
         test_acc = prev_run['linear_eval/test_acc'].fetch_values().value.tolist()
         start_epoch = len(test_acc) + 1
         
-        # for acc in test_acc:
-        #     neptune_run["linear_eval/test_acc"].append(acc)
+        for acc in test_acc:
+            neptune_run["linear_eval/test_acc"].append(acc)
             
         # loss = prev_run['simclr/loss'].fetch_values().value.tolist()
         # for i in loss:
@@ -254,7 +257,6 @@ def contrastive_round(
     batch_size = args.simclr_bs
     
     dist = get_policy_distribution(N=min(len(policies), 4), p=0.6)
-    print(f'policies dist: {dist}')
     train_loader = get_dataloader(
         args=args,
         batch_size=batch_size,
@@ -300,14 +302,21 @@ def contrastive_round(
 
 def main(args):
 
+    args.reduce_resnet = True
     
     if args.augmentation != 'ppo':
         args.random_p = 1
-        
+    else:
+        args.random_p = 0
+    
     if args.dataset == 'cifar10':
         args.epochs = 800
     elif args.dataset == 'svhn':
         args.epochs = 400
+    elif args.dataset == 'TinyImagenet':
+        args.epochs = 400
+        args.simclr_bs = 256
+        args.reduce_resnet = False
     
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -317,7 +326,8 @@ def main(args):
     
     neptune_run = init_neptune(
         tags=[
-            f'dataset={args.dataset}', 
+            f'dataset={args.dataset}',
+            f'simclr_bs={args.simclr_bs}',
             f'augmentation={args.augmentation}',
             f'randaugment_M={args.randaugment_M}',
             f'random_p={args.random_p}', 
@@ -336,6 +346,8 @@ def main(args):
     (encoder, simclr_optimizer, simclr_criterion), (decoder, ppo_optimizer), start_epoch, all_policies = init(args, neptune_run, device)
 
     
+    
+    # encoder = torch.nn.DataParallel(encoder)
 
 
     for epoch in tqdm(range(start_epoch, args.epochs+1), desc='[Main Loop]'):
@@ -390,14 +402,16 @@ def main(args):
         )
         
 
-        if epoch % 1 == 0:
+        if  ((args.dataset != 'TinyImagenet') and epoch % 1 == 0) or \
+            ((args.dataset == 'TinyImagenet') and epoch % 5 == 0):
             test_acc = knn_evaluation(encoder, args)
-        neptune_run["linear_eval/test_acc"].append(test_acc)
+            neptune_run["linear_eval/test_acc"].append(test_acc)
 
         
         
-        if (args.dataset == 'cifar10' and epoch in [200, 400, 600, 800]) or \
-           (args.dataset == 'svhn'    and epoch in [100, 200, 300, 400]):
+        if  (args.dataset == 'cifar10' and epoch in [200, 400, 600, 800]) or \
+            (args.dataset == 'svhn'    and epoch in [100, 200, 300, 400]) or \
+            (args.dataset == 'TinyImagenet' and epoch in [50, 100, 150, 200]):
             
             os.mkdir(f'{model_save_path}/epoch_{epoch}/')
             torch.save(encoder.state_dict(), f'{model_save_path}/epoch_{epoch}/encoder.pt')
@@ -426,12 +440,18 @@ def main(args):
                     neptune_run["params/policies"].upload(f'{model_save_path}/all_policies.pkl')
                 except:
                     pass
-
+    
+    
+    if isinstance(encoder, torch.nn.DataParallel):
+        enc = encoder.module.enc
+        enc = torch.nn.DataParallel(enc)
+    else:
+        enc = encoder.enc
 
     print('Linear evaluation man')
     accs = []
     for i in range(3):
-        accs.append(eval_loop(copy.deepcopy(encoder.enc), args, i))
+        accs.append(eval_loop(copy.deepcopy(enc), args, i))
         line_to_print = f'aggregated linear probe: {np.mean(accs):.3f} +- {np.std(accs):.3f}'
         print(line_to_print)
 
@@ -486,26 +506,29 @@ if __name__ == "__main__":
     if not args.model_save_path:
         model_save_path = get_model_save_path()
         args.model_save_path = model_save_path
-        
     
-    # args.dataset = 'svhn'     # ['cifar10', 'svhn', 'TinyImagenet']
-    # args.augmentation = 'random' # ['random', 'randaugment', 'ppo']
-    # args.randaugment_M = 15
         
-    # args.random_p = 0.0
+    args.dataset = 'TinyImagenet'     # ['cifar10', 'svhn', 'TinyImagenet']
+    args.augmentation = 'ppo' # ['random', 'randaugment', 'ppo']
+    args.randaugment_M = 9
         
-    # args.reward_a = 1.2
-    # args.reward_b = 0.2
-    # args.ppo_permutation_p = 0.0
+    args.random_p = 0.0
+        
+    args.reward_a = 1.5
+    args.reward_b = 0.2
+    args.ppo_permutation_p = 0.0
     
-    # args.proba_head = False
-    # args.two_branches = True
+    args.proba_head = False
+    args.two_branches = True
 
-    # args.mode = 'debug' # ['async', 'debug', 'sync']
+    args.mode = 'async' # ['async', 'debug', 'sync']
     
 
-    # args.checkpoint_id = "SIM-537"
-    # args.checkpoint_params = "params_728"
 
+    # args.checkpoint_id = "SIM-583"
+    # args.checkpoint_params = "params_848"
+
+    for k, v in vars(args).items():
+        print(k, ':', v)
 
     main(args)

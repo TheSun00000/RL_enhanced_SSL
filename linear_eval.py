@@ -25,9 +25,10 @@ if __name__ == "__main__":
     print(f'params: {ids}')
     
     if args.neptune:
+        print('neptune hahahahaha')
         neptune_run = init_neptune(
-            tags=['linear_eval'],
-            mode='debug'
+            tags=['linear_eval', str(args.dataset), str(ids)],
+            mode='async'
         )
         neptune_run["scripts"].upload_files(["./utils/*.py", "./*.py"])
 
@@ -37,13 +38,26 @@ if __name__ == "__main__":
         path = f'params/params_{id}/encoder.pt'
         print('Checkpoint:', path)
         
+        
         encoder = build_resnet50()
-        # encoder = build_resnet18()
-        encoder.load_state_dict(torch.load(path))
-        encoder = encoder.to(device)
+        try:
+            encoder.load_state_dict(torch.load(path))
+        except:
+            encoder = torch.nn.DataParallel(encoder)
+            encoder.load_state_dict(torch.load(path))
+            encoder = encoder.module
+            
+        # encoder = encoder.to(device)
 
+        # if isinstance(encoder, torch.nn.DataParallel):
+        #     enc = encoder.module.enc
+        #     enc = torch.nn.DataParallel(enc)
+        # else:
+        #     enc = encoder.enc
+        
+        
         accs = []
-        for i in range(2):
+        for i in range(1):
             accs.append(eval_loop(copy.deepcopy(encoder.enc), args, i))
             line_to_print = f'aggregated linear probe: {np.mean(accs):.3f} +- {np.std(accs):.3f}'
             print(line_to_print)

@@ -20,7 +20,7 @@ def count_occurrences(list_of_lists):
 
 
 class SimCLR(nn.Module):
-    def __init__(self, backbone):
+    def __init__(self, backbone, reduce):
         super(SimCLR, self).__init__()
         
         self.backbone = backbone
@@ -35,6 +35,13 @@ class SimCLR(nn.Module):
             raise NotImplementedError  
             
         
+        if reduce:
+            print('reduce hein')     
+            
+            self.enc.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+            self.enc.maxpool = nn.Identity()
+        else:
+            print('no reduce hein')     
                 
         self.projector = nn.Sequential(
             nn.Linear(self.feature_dim, 2048, bias=False),
@@ -66,11 +73,11 @@ class SimCLR(nn.Module):
         return feature, projection
     
     
-def build_resnet18():
-    return SimCLR('resnet18')
+def build_resnet18(reduce):
+    return SimCLR('resnet18', reduce)
 
-def build_resnet50():
-    return SimCLR('resnet50')
+def build_resnet50(reduce):
+    return SimCLR('resnet50', reduce)
 
   
 class DecoderNN_1input(nn.Module):

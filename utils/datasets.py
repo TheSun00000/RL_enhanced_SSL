@@ -84,6 +84,12 @@ class MyDataset(Dataset):
         
         if args.augmentation == 'random' or args.augmentation == 'ppo':
             self.random_policy = RandomAugmentation(N=2, pr=1)
+            # self.random_policy = transforms.Compose([
+            #     transforms.RandomApply([transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1)], p=0.5),
+            #     transforms.RandomGrayscale(p=0.2),
+            # ])
+            
+            
         elif args.augmentation == 'randaugment':
             self.random_policy = transforms.RandAugment(num_ops=2, magnitude=args.randaugment_M)
         

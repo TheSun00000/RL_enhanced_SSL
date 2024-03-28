@@ -222,8 +222,13 @@ def knn_evaluation(encoder, args):
     
     memory_loader, test_loader = get_knn_evaluation_loader(args.dataset, batch_size=512)
     
+    if isinstance(encoder, torch.nn.DataParallel):
+        enc = encoder.module.enc
+    else:
+        enc = encoder.enc
+
     acc = knn_monitor(
-        encoder.enc,
+        enc,
         memory_loader,
         test_loader,
     )
@@ -250,18 +255,28 @@ def top_k_accuracy(sim, k):
 
 def eval_loop(encoder, args, ind=None):
     
-    
-    train_loader, test_loader = get_linear_evaluation_loader(args.dataset, batch_size=256)
-    
-    
-    if len(encoder.layer4) == 2: # resnet18
-        feature_dim = 512
-    elif len(encoder.layer4) == 3: # resnet50
-        feature_dim = 2048
+    if args.dataset == 'TinyImagenet':
+        batch_size = 256
+        num_classes = 200
+        epochs = 100
     else:
-        raise NotImplementedError
+        batch_size = 256
+        num_classes = 10
+        epochs = 100
+        
+    train_loader, test_loader = get_linear_evaluation_loader(args.dataset, batch_size=batch_size)
+        
     
-    classifier = nn.Linear(feature_dim, 10).cuda()
+    feature_dim = 2048
+    
+    # if len(encoder.layer4) == 2: # resnet18
+    #     feature_dim = 512
+    # elif len(encoder.layer4) == 3: # resnet50
+    #     feature_dim = 2048
+    # else:
+    #     raise NotImplementedError
+    
+    classifier = nn.Linear(feature_dim, num_classes).cuda()
     # optimization
     optimizer = torch.optim.SGD(
         classifier.parameters(),
@@ -286,14 +301,14 @@ def eval_loop(encoder, args, ind=None):
         return lr
 
     # training
-    for e in tqdm(range(1, 101)):
+    for e in tqdm(range(1, epochs+1)):
         # declaring train
         classifier.train()
         encoder.eval()
         # epoch
         for it, (inputs, y) in enumerate(train_loader, start=(e - 1) * len(train_loader)):
             # adjust
-            adjust_learning_rate(epochs=100,
+            adjust_learning_rate(epochs=epochs,
                                  warmup_epochs=0,
                                  base_lr=30,
                                  optimizer=optimizer,
