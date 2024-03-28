@@ -309,7 +309,7 @@ def main(args):
     else:
         args.random_p = 0
     
-    if args.dataset == 'cifar10':
+    if args.dataset == 'cifar10' or args.dataset == 'cifar100':
         args.epochs = 800
     elif args.dataset == 'svhn':
         args.epochs = 400
@@ -402,15 +402,16 @@ def main(args):
         )
         
 
-        if  ((args.dataset != 'TinyImagenet') and epoch % 1 == 0) or \
-            ((args.dataset == 'TinyImagenet') and epoch % 5 == 0):
+        if  ((args.dataset in ['cifar10', 'svhn']) and epoch % 1 == 0) or \
+            ((args.dataset in ['cifar100', 'TinyImagenet']) and epoch % 5 == 0):
             test_acc = knn_evaluation(encoder, args)
             neptune_run["linear_eval/test_acc"].append(test_acc)
 
         
         
-        if  (args.dataset == 'cifar10' and epoch in [200, 400, 600, 800]) or \
-            (args.dataset == 'svhn'    and epoch in [100, 200, 300, 400]) or \
+        if  (args.dataset == 'cifar10'  and epoch in [200, 400, 600, 800]) or \
+            (args.dataset == 'cifar100' and epoch in [200, 400, 600, 800]) or \
+            (args.dataset == 'svhn'     and epoch in [100, 200, 300, 400]) or \
             (args.dataset == 'TinyImagenet' and epoch in [50, 100, 150, 200]):
             
             os.mkdir(f'{model_save_path}/epoch_{epoch}/')
@@ -473,7 +474,7 @@ if __name__ == "__main__":
     parser.add_argument('--simclr_bs', type=int, default=512, help='Batch size for SimCLR training')
     parser.add_argument('--random_p', type=float, default=1.0, help='Random probability')
     parser.add_argument('--encoder_backbone', type=str, default='resnet50', choices=['resnet18', 'resnet50'], help='Encoder backbone architecture')
-    parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'svhn', 'TinyImagenet'], help='Dataset')
+    parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'svhn', 'TinyImagenet', 'cifar100'], help='Dataset')
     parser.add_argument('--augmentation', type=str, default='random', choices=['random', 'randaugment', 'ppo'], help='Dataset')
     parser.add_argument('--randaugment_M', type=int, default=9, help='Dataset')
 
@@ -508,7 +509,7 @@ if __name__ == "__main__":
         args.model_save_path = model_save_path
     
         
-    args.dataset = 'TinyImagenet'     # ['cifar10', 'svhn', 'TinyImagenet']
+    args.dataset = 'cifar100'     # ['cifar10', 'svhn', 'TinyImagenet', 'cifar100', 'stl10']
     args.augmentation = 'ppo' # ['random', 'randaugment', 'ppo']
     args.randaugment_M = 9
         
@@ -521,7 +522,7 @@ if __name__ == "__main__":
     args.proba_head = False
     args.two_branches = True
 
-    args.mode = 'async' # ['async', 'debug', 'sync']
+    args.mode = 'debug' # ['async', 'debug', 'sync']
     
 
 

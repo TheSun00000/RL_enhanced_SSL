@@ -146,12 +146,14 @@ class MyDataset(Dataset):
 
 def get_dataloader(args, batch_size, policies=[], random_p=1, ppo_dist=[], transform=True):        
     
-    if args.dataset in ['cifar10', 'svhn'] :
+    if args.dataset in ['cifar10', 'svhn', 'cifar100'] :
         normalize = transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
         random_resized_crop = transforms.RandomResizedCrop(32, scale=(0.2, 1.))
         
         if args.dataset == 'cifar10':
             dataset = torchvision.datasets.CIFAR10('./dataset/')
+        elif args.dataset == 'cifar100':
+            dataset = torchvision.datasets.CIFAR100('./dataset/cifar100/')
         elif args.dataset == 'svhn':
             dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='train')
         
@@ -201,7 +203,7 @@ def get_dataloader(args, batch_size, policies=[], random_p=1, ppo_dist=[], trans
 
 def get_knn_evaluation_loader(dataset_name, batch_size=512):
     
-    if dataset_name in ['cifar10', 'svhn']:
+    if dataset_name in ['cifar10', 'svhn', 'cifar100']:
         single_transform = transforms.Compose([
             transforms.ToTensor(), 
             transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
@@ -210,6 +212,9 @@ def get_knn_evaluation_loader(dataset_name, batch_size=512):
         if dataset_name == 'cifar10':
             train_dataset = torchvision.datasets.CIFAR10('./dataset', train=True, transform=single_transform)
             test_dataset = torchvision.datasets.CIFAR10('./dataset', train=False, transform=single_transform)
+        elif dataset_name == 'cifar100':
+            train_dataset = torchvision.datasets.CIFAR100('./dataset/cifar100', train=True, transform=single_transform)
+            test_dataset = torchvision.datasets.CIFAR100('./dataset/cifar100', train=False, transform=single_transform)
         elif dataset_name == 'svhn':
             train_dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='train', transform=single_transform)
             test_dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='test', transform=single_transform)
@@ -249,7 +254,7 @@ def get_knn_evaluation_loader(dataset_name, batch_size=512):
 
 def get_linear_evaluation_loader(dataset_name, batch_size):
     
-    if dataset_name in ['cifar10', 'svhn']:
+    if dataset_name in ['cifar10', 'svhn', 'cifar100']:
 
         train_transform = transforms.Compose([
             transforms.RandomResizedCrop(32, interpolation=transforms.InterpolationMode.BICUBIC),
@@ -268,6 +273,9 @@ def get_linear_evaluation_loader(dataset_name, batch_size):
         if dataset_name == 'cifar10':
             train_dataset = torchvision.datasets.CIFAR10('./dataset', train=True, transform=train_transform)
             test_dataset = torchvision.datasets.CIFAR10('./dataset', train=False, transform=test_transform)
+        elif dataset_name == 'cifar100':
+            train_dataset = torchvision.datasets.CIFAR100('./dataset/cifar100', train=True, transform=train_transform)
+            test_dataset = torchvision.datasets.CIFAR100('./dataset/cifar100', train=False, transform=test_transform)
         elif dataset_name == 'svhn':
             train_dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='train', transform=train_transform)
             test_dataset = torchvision.datasets.SVHN('./dataset/SVHN/', split='test', transform=test_transform)

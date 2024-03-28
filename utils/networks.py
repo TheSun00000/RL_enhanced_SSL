@@ -38,7 +38,7 @@ class SimCLR(nn.Module):
         if reduce:
             print('reduce hein')     
             
-            self.enc.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+            self.enc.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
             self.enc.maxpool = nn.Identity()
         else:
             print('no reduce hein')     
